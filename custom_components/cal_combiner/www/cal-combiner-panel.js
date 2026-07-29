@@ -6,6 +6,8 @@ class CalCombinerPanel extends HTMLElement {
     this._activitySensors = [];
     this._initialized = false;
     this._activeTab = "calendars";
+    this._activeCalendarKey = "__new__"; // entry_id, or "__new__" for the create-new sub-tab
+    this._activeSensorKey = "__new__";
     this._openFilters = {}; // "entryId::entityId" -> bool
   }
 
@@ -24,8 +26,10 @@ class CalCombinerPanel extends HTMLElement {
   async _boot() {
     this.innerHTML = `
       <style>
-        :host { display: block; padding: 16px; max-width: 960px; margin: 0 auto;
+        :host { display: block; box-sizing: border-box; min-height: 100%; padding: 16px;
+          max-width: 960px; margin: 0 auto;
           font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
+        *, *::before, *::after { box-sizing: border-box; }
         h1 { font-size: 24px; font-weight: 400; color: var(--primary-text-color); margin: 4px 0 4px 0;
           display: flex; align-items: center; gap: 10px; }
         h1 ha-icon { --mdc-icon-size: 28px; color: var(--primary-color); }
@@ -37,6 +41,19 @@ class CalCombinerPanel extends HTMLElement {
           font-weight: 500; color: var(--secondary-text-color); }
         .cc-tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
         .cc-tab ha-icon { --mdc-icon-size: 20px; }
+        .cc-subtabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+        .cc-subtab { display: flex; align-items: center; gap: 6px; padding: 6px 14px; cursor: pointer;
+          background: var(--secondary-background-color, #eee); border: 1px solid transparent; border-radius: 999px;
+          font-size: 13px; color: var(--primary-text-color); }
+        .cc-subtab.active { background: var(--primary-color); color: var(--text-primary-color, white); }
+        .cc-subtab-new { background: transparent; border: 1px dashed var(--divider-color, #ccc);
+          color: var(--secondary-text-color); }
+        .cc-subtab-new.active { background: var(--primary-color); color: var(--text-primary-color, white);
+          border-style: solid; }
+        .cc-subtab ha-icon { --mdc-icon-size: 16px; }
+        .cc-render-error { color: var(--error-color, #db4437); background: rgba(219,68,55,0.08);
+          border: 1px solid var(--error-color, #db4437); border-radius: 8px; padding: 12px; margin-bottom: 16px;
+          font-size: 13px; white-space: pre-wrap; }
         .cc-card {
           background: var(--card-background-color, white);
           border-radius: var(--ha-card-border-radius, 12px);
@@ -135,35 +152,107 @@ class CalCombinerPanel extends HTMLElement {
     root.innerHTML = "";
 
     if (this._activeTab === "calendars") {
-      this._entries.forEach((entry) => root.appendChild(this._renderEntryCard(entry)));
-      root.appendChild(this._renderNewEntryCard());
+      if (
+        this._activeCalendarKey !== "__new__" &&
+        !this._entries.find((e) => e.entry_id === this._activeCalendarKey)
+      ) {
+        this._activeCalendarKey = this._entries.length ? this._entries[0].entry_id : "__new__";
+      }
+      root.appendChild(
+        this._renderSubTabs(this._entries, this._activeCalendarKey, (key) => {
+          this._activeCalendarKey = key;
+          this._render();
+        })
+      );
+      if (this._activeCalendarKey === "__new__") {
+        this._safeAppend(root, () => this._renderNewEntryCard(), "ny kalender");
+      } else {
+        const entry = this._entries.find((e) => e.entry_id === this._activeCalendarKey);
+        this._safeAppend(root, () => this._renderEntryCard(entry), `kalendern "${entry.name}"`);
+      }
     } else {
       const sub = document.createElement("p");
       sub.className = "subtitle";
       sub.textContent =
         "Skapar en binary_sensor (på/av) och/eller sensor (visar aktuellt/nästa event) för ett filtrerat urval av kalenderaktiviteter.";
       root.appendChild(sub);
-      this._activitySensors.forEach((sensorEntry) =>
-        root.appendChild(this._renderActivitySensorCard(sensorEntry))
+
+      if (
+        this._activeSensorKey !== "__new__" &&
+        !this._activitySensors.find((e) => e.entry_id === this._activeSensorKey)
+      ) {
+        this._activeSensorKey = this._activitySensors.length ? this._activitySensors[0].entry_id : "__new__";
+      }
+      root.appendChild(
+        this._renderSubTabs(this._activitySensors, this._activeSensorKey, (key) => {
+          this._activeSensorKey = key;
+          this._render();
+        })
       );
-      root.appendChild(this._renderNewActivitySensorCard());
+      if (this._activeSensorKey === "__new__") {
+        this._safeAppend(root, () => this._renderNewActivitySensorCard(), "ny sensor");
+      } else {
+        const sensorEntry = this._activitySensors.find((e) => e.entry_id === this._activeSensorKey);
+        this._safeAppend(root, () => this._renderActivitySensorCard(sensorEntry), `sensorn "${sensorEntry.name}"`);
+      }
     }
   }
 
   // ---- shared building blocks ----
 
+  /** Renders `build()` into `root`, or a visible error box instead of leaving the tab silently blank. */
+  _safeAppend(root, build, context) {
+    try {
+      root.appendChild(build());
+    } catch (err) {
+      console.error(`Cal Combiner: kunde inte rita ${context}`, err);
+      const box = document.createElement("div");
+      box.className = "cc-render-error";
+      box.textContent = `Kunde inte visa ${context}: ${err.message || err}\n(Se webbläsarens konsol för mer detaljer.)`;
+      root.appendChild(box);
+    }
+  }
+
+  _renderSubTabs(items, activeKey, onSelect) {
+    const bar = document.createElement("div");
+    bar.className = "cc-subtabs";
+    items.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "cc-subtab" + (item.entry_id === activeKey ? " active" : "");
+      btn.textContent = item.name;
+      btn.onclick = () => onSelect(item.entry_id);
+      bar.appendChild(btn);
+    });
+    const newBtn = document.createElement("button");
+    newBtn.type = "button";
+    newBtn.className = "cc-subtab cc-subtab-new" + (activeKey === "__new__" ? " active" : "");
+    newBtn.innerHTML = `<ha-icon icon="mdi:plus"></ha-icon>`;
+    newBtn.onclick = () => onSelect("__new__");
+    bar.appendChild(newBtn);
+    return bar;
+  }
+
   _buildIconPicker(value) {
     const wrap = document.createElement("div");
     wrap.className = "cc-icon-picker";
     let getValue;
+    let usedPicker = false;
     if (customElements.get("ha-icon-picker")) {
-      const picker = document.createElement("ha-icon-picker");
-      picker.hass = this._hass;
-      picker.label = "Ikon";
-      picker.value = value || "";
-      wrap.appendChild(picker);
-      getValue = () => picker.value || "";
-    } else {
+      try {
+        const picker = document.createElement("ha-icon-picker");
+        picker.hass = this._hass;
+        picker.label = "Ikon";
+        picker.value = value || "";
+        wrap.appendChild(picker);
+        getValue = () => picker.value || "";
+        usedPicker = true;
+      } catch (err) {
+        console.warn("Cal Combiner: ha-icon-picker gick inte att använda, faller tillbaka på textfält", err);
+        wrap.innerHTML = "";
+      }
+    }
+    if (!usedPicker) {
       const row = document.createElement("div");
       row.className = "cc-row";
       const icon = document.createElement("ha-icon");
@@ -409,8 +498,7 @@ class CalCombinerPanel extends HTMLElement {
     box.appendChild(toggle);
 
     const filterControls = this._buildFilterFieldsControls(rule);
-    filterControls.element.classList.remove("open");
-    filterControls.element.classList.add(this._openFilters[key] ? "open" : "");
+    filterControls.element.classList.toggle("open", !!this._openFilters[key]);
     filterControls.element.style.background = "";
     filterControls.element.style.padding = "";
 
@@ -623,13 +711,14 @@ class CalCombinerPanel extends HTMLElement {
         return;
       }
       try {
-        await this._hass.callWS({
+        const result = await this._hass.callWS({
           type: "cal_combiner/create_entry",
           name: nameInput.value.trim(),
           sources: sourcePicker.getSelected(),
           icon: iconPicker.getValue(),
           picture: picturePicker.getValue(),
         });
+        this._activeCalendarKey = result.entry_id;
         await this._reload();
       } catch (err) {
         errorBox.textContent = err.message || "Kunde inte skapa kalendern";
@@ -891,7 +980,7 @@ class CalCombinerPanel extends HTMLElement {
       }
       const values = filterControls.getValues();
       try {
-        await this._hass.callWS({
+        const result = await this._hass.callWS({
           type: "cal_combiner/create_activity_sensor",
           name: nameInput.value.trim(),
           sources: selectedSources,
@@ -906,6 +995,7 @@ class CalCombinerPanel extends HTMLElement {
           create_binary_sensor: binaryCb.checked,
           create_sensor: sensorCb.checked,
         });
+        this._activeSensorKey = result.entry_id;
         await this._reload();
       } catch (err) {
         errorBox.textContent = err.message || "Kunde inte skapa sensorn";

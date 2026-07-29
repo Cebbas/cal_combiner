@@ -44,10 +44,12 @@
 
 ## Sidopanel
 - [x] Två flikar: Kalendrar och Sensorer, i en stil som liknar HA:s inbyggda paneler
+- [x] Varje kalender/sensor får sin egen under-flik (pill-tabs) under Kalendrar/Sensorer, plus en "+"-flik för att skapa ny
 - [x] Rullgardin + "Lägg till"-knapp för att välja källkalendrar istället för en lång kryssrutelista
 - [x] Filter (inkludera/uteslut/regex/skiftläge) redigerbara direkt i panelen
 - [x] Kopiera ICS-länk (både https och webcal) direkt i panelen
 - [x] Ikon- och bildväljare för både kalendrar och sensorer
+- [x] Kortrenderingen är felskyddad (try/catch per kort) så ett trasigt kort visar ett läsbart felmeddelande istället för att lämna hela fliken tom
 - [ ] Drag-och-släpp / färgkodning per källa i panelen (mer avancerad frontend, likt vacuum scheduler)
 - [ ] Visa `failed_sources`-status i panelen (just nu bara synligt som entity-attribut/notis)
 

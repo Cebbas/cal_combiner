@@ -117,7 +117,7 @@ async def ws_create_entry(hass: HomeAssistant, connection, msg):
     if result.get("type") == "form":
         connection.send_error(msg["id"], "invalid_input", "Kunde inte skapa kalendern")
         return
-    connection.send_result(msg["id"], {"ok": True})
+    connection.send_result(msg["id"], {"ok": True, "entry_id": result["result"].entry_id})
 
 
 @websocket_api.require_admin
@@ -243,7 +243,7 @@ async def ws_create_activity_sensor(hass: HomeAssistant, connection, msg):
     if result.get("type") == "form":
         connection.send_error(msg["id"], "invalid_input", "Kunde inte skapa sensorn")
         return
-    connection.send_result(msg["id"], {"ok": True})
+    connection.send_result(msg["id"], {"ok": True, "entry_id": result["result"].entry_id})
 
 
 @websocket_api.require_admin
