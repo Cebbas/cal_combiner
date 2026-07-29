@@ -43,7 +43,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
             "_panel_custom": {
                 "name": "cal-combiner-panel",
                 "embed_iframe": False,
-                "trust_external": False,
+                "trust_external": True,
                 "js_url": f"{_STATIC_URL}/cal-combiner-panel.js?v=1",
             }
         },
