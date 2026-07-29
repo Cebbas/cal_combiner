@@ -95,6 +95,7 @@ class CalCombinerPanel extends HTMLElement {
         .cc-chip-empty { font-size: 13px; color: var(--secondary-text-color); font-style: italic; }
         .cc-icon-picker .cc-row ha-icon { --mdc-icon-size: 22px; color: var(--primary-text-color); }
         .cc-picture-preview { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; display: none; }
+        .cc-picture-status { display: block; font-size: 12px; color: var(--secondary-text-color); margin-top: 4px; }
         .cc-filter-box { border-top: 1px dashed var(--divider-color, #ccc); margin-top: 8px; padding-top: 8px; }
         .cc-filter-toggle { font-size: 13px; color: var(--primary-color); cursor: pointer; background: none;
           border: none; padding: 4px 0; text-align: left; }
@@ -270,31 +271,117 @@ class CalCombinerPanel extends HTMLElement {
     return { element: wrap, getValue };
   }
 
+  // Uploads through Home Assistant's built-in image storage (the same
+  // /api/image/upload + /api/image/serve mechanism used by e.g. the Person
+  // and Area picture pickers), so images live in HA itself instead of a
+  // pasted URL.
   _buildPicturePicker(value) {
+    const state = { value: value || "" };
     const wrap = document.createElement("div");
-    wrap.className = "cc-row";
-    const input = document.createElement("input");
-    input.type = "text";
-    input.placeholder = "Bild-URL, t.ex. https://... eller /local/bild.jpg";
-    input.value = value || "";
+    wrap.className = "cc-picture-picker";
+
+    const row = document.createElement("div");
+    row.className = "cc-row";
+
     const preview = document.createElement("img");
     preview.className = "cc-picture-preview";
-    if (value) {
-      preview.src = value;
+    if (state.value) {
+      preview.src = state.value;
       preview.style.display = "block";
     }
-    input.oninput = () => {
-      const v = input.value.trim();
-      if (v) {
-        preview.src = v;
-        preview.style.display = "block";
-      } else {
-        preview.style.display = "none";
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = "image/png,image/jpeg,image/gif";
+    fileInput.style.display = "none";
+
+    const uploadBtn = document.createElement("button");
+    uploadBtn.type = "button";
+    uploadBtn.className = "secondary";
+    uploadBtn.textContent = state.value ? "Byt bild" : "Ladda upp bild";
+    uploadBtn.onclick = () => fileInput.click();
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "secondary";
+    removeBtn.textContent = "Ta bort bild";
+    removeBtn.style.display = state.value ? "inline-block" : "none";
+
+    const status = document.createElement("span");
+    status.className = "cc-picture-status";
+
+    const oldImageId = (url) => {
+      const m = /^\/api\/image\/serve\/([^/]+)\/original$/.exec(url || "");
+      return m ? m[1] : null;
+    };
+
+    const clear = async ({ deleteRemote } = {}) => {
+      const previousId = deleteRemote ? oldImageId(state.value) : null;
+      state.value = "";
+      preview.removeAttribute("src");
+      preview.style.display = "none";
+      removeBtn.style.display = "none";
+      uploadBtn.textContent = "Ladda upp bild";
+      if (previousId) {
+        try {
+          await this._hass.callWS({ type: "image/delete", image_id: previousId });
+        } catch (err) {
+          // Non-critical cleanup; the reference is gone from our config either way.
+          console.warn("Cal Combiner: kunde inte städa bort gammal bild", err);
+        }
       }
     };
-    wrap.appendChild(input);
-    wrap.appendChild(preview);
-    return { element: wrap, getValue: () => input.value.trim() };
+
+    removeBtn.onclick = () => clear({ deleteRemote: true });
+
+    fileInput.onchange = async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      uploadBtn.disabled = true;
+      removeBtn.disabled = true;
+      status.textContent = "Laddar upp…";
+      const previousId = oldImageId(state.value);
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const resp = await this._hass.fetchWithAuth("/api/image/upload", {
+          method: "POST",
+          body: fd,
+        });
+        if (!resp.ok) {
+          throw new Error(resp.status === 413 ? "Bilden är för stor" : `Uppladdning misslyckades (${resp.status})`);
+        }
+        const item = await resp.json();
+        state.value = `/api/image/serve/${item.id}/original`;
+        preview.src = state.value;
+        preview.style.display = "block";
+        removeBtn.style.display = "inline-block";
+        uploadBtn.textContent = "Byt bild";
+        status.textContent = "";
+        if (previousId) {
+          try {
+            await this._hass.callWS({ type: "image/delete", image_id: previousId });
+          } catch (err) {
+            console.warn("Cal Combiner: kunde inte städa bort gammal bild", err);
+          }
+        }
+      } catch (err) {
+        status.textContent = err.message || "Kunde inte ladda upp bilden";
+      } finally {
+        uploadBtn.disabled = false;
+        removeBtn.disabled = false;
+        fileInput.value = "";
+      }
+    };
+
+    row.appendChild(preview);
+    row.appendChild(uploadBtn);
+    row.appendChild(removeBtn);
+    row.appendChild(fileInput);
+    wrap.appendChild(row);
+    wrap.appendChild(status);
+
+    return { element: wrap, getValue: () => state.value };
   }
 
   _buildSourcePicker(initialSelected) {

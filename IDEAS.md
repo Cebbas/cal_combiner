@@ -39,8 +39,8 @@
 
 ## Utseende
 - [x] Egen ikon per kalender och per aktivitetssensor
-- [x] Egen bild (URL) per kalender och per aktivitetssensor
-- [ ] Riktig bilduppladdning (via HA:s media-/bildhanterare) istället för URL-textfält
+- [x] Egen bild per kalender och per aktivitetssensor, uppladdad direkt i panelen via HA:s inbyggda bilduppladdning (`/api/image/upload`, samma mekanism som Person/Area-bilder) istället för en URL-textfält
+- [ ] Bildfältet i det vanliga config-flowet (Inställningar → Enheter & tjänster) är fortfarande en textrad för URL, eftersom HA saknar en generisk bilduppladdnings-selector för config flows – uppladdning finns bara i sidopanelen
 
 ## Sidopanel
 - [x] Två flikar: Kalendrar och Sensorer, i en stil som liknar HA:s inbyggda paneler
