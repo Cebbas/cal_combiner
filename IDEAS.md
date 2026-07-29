@@ -59,6 +59,9 @@
 - [ ] Konfigurerbart pollningsintervall (idag hårdkodat till 5 min) via options flow eller panelen
 - [ ] Stöd för att skriva uppdateringar tillbaka till en annan källa än ursprungskällan (flytta event mellan kalendrar)
 
+## Buggar (fixade)
+- [x] Panelen renderades i light DOM utan `attachShadow`, så `<style>:host{...}</style>` matchade ingenting (våra egna storleksregler gällde aldrig) samtidigt som våra vanliga tagg-/klassväljare (`button`, `select`, `input[type="text"]`, `h1`, `*`) läckte ut och gällde globalt i HELA Home Assistant-appen, inte bara panelen. Fixat genom att faktiskt använda `this.attachShadow({mode:"open"})` och rendera allt inuti shadow-roten.
+
 ## Kända begränsningar
 - Recurring events hanteras som redan expanderade instanser inom tidsfönstret – redigering av en hel serie sker i källkalendern, inte i merge-kalendern
 - Den egna, automatiskt skapade kalendern stödjer inte återkommande event (RRULE) – varje event lagras som ett enskilt tillfälle

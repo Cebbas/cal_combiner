@@ -9,5 +9,7 @@ __pycache__/
 venv/
 
 .DS_Store
+*.mov
+*.mp4
 .idea/
 .vscode/

@@ -1,6 +1,13 @@
 class CalCombinerPanel extends HTMLElement {
   constructor() {
     super();
+    // A real shadow root is required for the `:host` selector below (and for
+    // our plain `button`/`input`/`select`/`h1`/`*` rules) to actually stay
+    // scoped to this panel. Without one, that <style> tag is just a normal
+    // light-DOM stylesheet: `:host` matches nothing (so our own sizing rules
+    // silently no-op) while the generic tag/class selectors leak out and
+    // apply to the rest of the Home Assistant UI.
+    this.attachShadow({ mode: "open" });
     this._entries = [];
     this._calendars = [];
     this._activitySensors = [];
@@ -24,7 +31,7 @@ class CalCombinerPanel extends HTMLElement {
   }
 
   async _boot() {
-    this.innerHTML = `
+    this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; box-sizing: border-box; min-height: 100%; padding: 16px;
           max-width: 960px; margin: 0 auto;
@@ -118,7 +125,7 @@ class CalCombinerPanel extends HTMLElement {
       </div>
       <div id="root">Laddar…</div>
     `;
-    this.querySelectorAll(".cc-tab").forEach((btn) => {
+    this.shadowRoot.querySelectorAll(".cc-tab").forEach((btn) => {
       btn.onclick = () => {
         this._activeTab = btn.dataset.tab;
         this._render();
@@ -145,11 +152,11 @@ class CalCombinerPanel extends HTMLElement {
   }
 
   _render() {
-    this.querySelectorAll(".cc-tab").forEach((btn) => {
+    this.shadowRoot.querySelectorAll(".cc-tab").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.tab === this._activeTab);
     });
 
-    const root = this.querySelector("#root");
+    const root = this.shadowRoot.querySelector("#root");
     root.innerHTML = "";
 
     if (this._activeTab === "calendars") {

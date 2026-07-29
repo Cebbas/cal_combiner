@@ -8,5 +8,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Cebbas/cal_combiner/issues",
   "requirements": ["icalendar>=5.0.11"],
-  "version": "0.0.3"
+  "version": "0.0.4"
 }
