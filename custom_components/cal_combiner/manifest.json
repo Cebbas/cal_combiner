@@ -1,0 +1,12 @@
+{
+  "domain": "cal_combiner",
+  "name": "Cal Combiner",
+  "codeowners": ["@Cebbas"],
+  "config_flow": true,
+  "dependencies": ["http", "frontend", "websocket_api"],
+  "documentation": "https://github.com/Cebbas/cal_combiner",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/Cebbas/cal_combiner/issues",
+  "requirements": ["icalendar>=5.0.11"],
+  "version": "0.2.0"
+}

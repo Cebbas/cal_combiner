@@ -1,0 +1,920 @@
+class CalCombinerPanel extends HTMLElement {
+  constructor() {
+    super();
+    this._entries = [];
+    this._calendars = [];
+    this._activitySensors = [];
+    this._initialized = false;
+    this._activeTab = "calendars";
+    this._openFilters = {}; // "entryId::entityId" -> bool
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (!this._initialized) {
+      this._initialized = true;
+      this._boot();
+    }
+  }
+
+  get hass() {
+    return this._hass;
+  }
+
+  async _boot() {
+    this.innerHTML = `
+      <style>
+        :host { display: block; padding: 16px; max-width: 960px; margin: 0 auto;
+          font-family: var(--paper-font-body1_-_font-family, Roboto, sans-serif); }
+        h1 { font-size: 24px; font-weight: 400; color: var(--primary-text-color); margin: 4px 0 4px 0;
+          display: flex; align-items: center; gap: 10px; }
+        h1 ha-icon { --mdc-icon-size: 28px; color: var(--primary-color); }
+        p.subtitle { color: var(--secondary-text-color); margin-top: 0; margin-bottom: 20px; }
+        .cc-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--divider-color, #ccc);
+          margin-bottom: 20px; }
+        .cc-tab { display: flex; align-items: center; gap: 6px; padding: 10px 18px; cursor: pointer;
+          background: none; border: none; border-bottom: 2px solid transparent; font-size: 14px;
+          font-weight: 500; color: var(--secondary-text-color); }
+        .cc-tab.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+        .cc-tab ha-icon { --mdc-icon-size: 20px; }
+        .cc-card {
+          background: var(--card-background-color, white);
+          border-radius: var(--ha-card-border-radius, 12px);
+          box-shadow: var(--ha-card-box-shadow, 0 2px 4px rgba(0,0,0,0.1));
+          padding: 16px; margin-bottom: 16px; border: 1px solid var(--ha-card-border-color, transparent);
+        }
+        .cc-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+        .cc-card-header ha-icon { --mdc-icon-size: 24px; color: var(--primary-color); flex-shrink: 0; }
+        .cc-card-header img.cc-avatar { width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+          flex-shrink: 0; }
+        .cc-card-header input[type="text"].cc-name { font-size: 16px; font-weight: 500; flex: 1; }
+        .cc-section-title { font-weight: 500; font-size: 13px; text-transform: uppercase;
+          letter-spacing: .03em; color: var(--secondary-text-color); margin: 16px 0 6px 0; }
+        .cc-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+        input[type="text"], select {
+          padding: 8px 10px; border-radius: 6px; min-width: 160px;
+          border: 1px solid var(--divider-color, #ccc); background: var(--card-background-color);
+          color: var(--primary-text-color); font-size: 14px; box-sizing: border-box;
+        }
+        input[type="text"] { flex: 1; }
+        .cc-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+        button {
+          border: none; border-radius: 6px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+          background: var(--primary-color); color: var(--text-primary-color, white);
+        }
+        button.secondary { background: transparent; color: var(--primary-color);
+          border: 1px solid var(--primary-color); }
+        button.danger { background: var(--error-color, #db4437); color: white; }
+        button:disabled { opacity: .4; cursor: default; }
+        .cc-own-box { display: flex; align-items: center; gap: 8px; background: var(--secondary-background-color, #f4f4f4);
+          border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--secondary-text-color); }
+        .cc-own-box ha-icon { --mdc-icon-size: 18px; color: var(--primary-color); }
+        .cc-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+        .cc-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--secondary-background-color, #eee);
+          border-radius: 999px; padding: 4px 6px 4px 10px; font-size: 13px; color: var(--primary-text-color); }
+        .cc-chip-remove { background: none; border: none; color: var(--secondary-text-color); cursor: pointer;
+          font-size: 15px; line-height: 1; padding: 2px 4px; border-radius: 50%; }
+        .cc-chip-remove:hover { background: rgba(0,0,0,0.1); }
+        .cc-chip-empty { font-size: 13px; color: var(--secondary-text-color); font-style: italic; }
+        .cc-icon-picker .cc-row ha-icon { --mdc-icon-size: 22px; color: var(--primary-text-color); }
+        .cc-picture-preview { width: 40px; height: 40px; border-radius: 6px; object-fit: cover; display: none; }
+        .cc-filter-box { border-top: 1px dashed var(--divider-color, #ccc); margin-top: 8px; padding-top: 8px; }
+        .cc-filter-toggle { font-size: 13px; color: var(--primary-color); cursor: pointer; background: none;
+          border: none; padding: 4px 0; text-align: left; }
+        .cc-filter-fields { display: none; flex-direction: column; gap: 8px; margin-top: 8px; padding: 8px;
+          background: var(--secondary-background-color, #f4f4f4); border-radius: 8px; }
+        .cc-filter-fields.open { display: flex; }
+        .cc-filter-fields label { font-size: 13px; color: var(--secondary-text-color); display: flex; align-items: center; gap: 6px; }
+        .cc-feed-row { display: flex; gap: 6px; margin-top: 4px; }
+        .cc-feed-row input { font-size: 12px; }
+        .cc-source-block { border: 1px solid var(--divider-color, #eee); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+        .cc-error { color: var(--error-color, #db4437); font-size: 13px; margin: 4px 0; }
+        .cc-warning { color: var(--warning-color, #ff9800); font-size: 12px; margin: 4px 0; }
+        .cc-new-card { border: 2px dashed var(--divider-color, #ccc); }
+      </style>
+      <h1><ha-icon icon="mdi:calendar-sync"></ha-icon>Cal Combiner</h1>
+      <p class="subtitle">Bygg och hantera dina sammanslagna kalendrar och aktivitetssensorer.</p>
+      <div class="cc-tabs">
+        <button class="cc-tab" data-tab="calendars"><ha-icon icon="mdi:calendar-multiple"></ha-icon>Kalendrar</button>
+        <button class="cc-tab" data-tab="sensors"><ha-icon icon="mdi:motion-sensor"></ha-icon>Sensorer</button>
+      </div>
+      <div id="root">Laddar…</div>
+    `;
+    this.querySelectorAll(".cc-tab").forEach((btn) => {
+      btn.onclick = () => {
+        this._activeTab = btn.dataset.tab;
+        this._render();
+      };
+    });
+    await this._reload();
+  }
+
+  async _reload() {
+    const [entriesResp, calendarsResp, activityResp] = await Promise.all([
+      this._hass.callWS({ type: "cal_combiner/list_entries" }),
+      this._hass.callWS({ type: "cal_combiner/list_calendars" }),
+      this._hass.callWS({ type: "cal_combiner/list_activity_sensors" }),
+    ]);
+    this._entries = entriesResp.entries;
+    this._calendars = calendarsResp.calendars;
+    this._activitySensors = activityResp.entries;
+    this._render();
+  }
+
+  _calendarName(entityId) {
+    const found = this._calendars.find((c) => c.entity_id === entityId);
+    return found ? found.name : entityId;
+  }
+
+  _render() {
+    this.querySelectorAll(".cc-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === this._activeTab);
+    });
+
+    const root = this.querySelector("#root");
+    root.innerHTML = "";
+
+    if (this._activeTab === "calendars") {
+      this._entries.forEach((entry) => root.appendChild(this._renderEntryCard(entry)));
+      root.appendChild(this._renderNewEntryCard());
+    } else {
+      const sub = document.createElement("p");
+      sub.className = "subtitle";
+      sub.textContent =
+        "Skapar en binary_sensor (på/av) och/eller sensor (visar aktuellt/nästa event) för ett filtrerat urval av kalenderaktiviteter.";
+      root.appendChild(sub);
+      this._activitySensors.forEach((sensorEntry) =>
+        root.appendChild(this._renderActivitySensorCard(sensorEntry))
+      );
+      root.appendChild(this._renderNewActivitySensorCard());
+    }
+  }
+
+  // ---- shared building blocks ----
+
+  _buildIconPicker(value) {
+    const wrap = document.createElement("div");
+    wrap.className = "cc-icon-picker";
+    let getValue;
+    if (customElements.get("ha-icon-picker")) {
+      const picker = document.createElement("ha-icon-picker");
+      picker.hass = this._hass;
+      picker.label = "Ikon";
+      picker.value = value || "";
+      wrap.appendChild(picker);
+      getValue = () => picker.value || "";
+    } else {
+      const row = document.createElement("div");
+      row.className = "cc-row";
+      const icon = document.createElement("ha-icon");
+      icon.setAttribute("icon", value || "mdi:help-circle-outline");
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = "mdi:calendar";
+      input.value = value || "";
+      input.oninput = () => icon.setAttribute("icon", input.value.trim() || "mdi:help-circle-outline");
+      row.appendChild(icon);
+      row.appendChild(input);
+      wrap.appendChild(row);
+      getValue = () => input.value.trim();
+    }
+    return { element: wrap, getValue };
+  }
+
+  _buildPicturePicker(value) {
+    const wrap = document.createElement("div");
+    wrap.className = "cc-row";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Bild-URL, t.ex. https://... eller /local/bild.jpg";
+    input.value = value || "";
+    const preview = document.createElement("img");
+    preview.className = "cc-picture-preview";
+    if (value) {
+      preview.src = value;
+      preview.style.display = "block";
+    }
+    input.oninput = () => {
+      const v = input.value.trim();
+      if (v) {
+        preview.src = v;
+        preview.style.display = "block";
+      } else {
+        preview.style.display = "none";
+      }
+    };
+    wrap.appendChild(input);
+    wrap.appendChild(preview);
+    return { element: wrap, getValue: () => input.value.trim() };
+  }
+
+  _buildSourcePicker(initialSelected) {
+    const state = { selected: [...initialSelected] };
+    const wrap = document.createElement("div");
+
+    const chipsWrap = document.createElement("div");
+    chipsWrap.className = "cc-chips";
+
+    const pickRow = document.createElement("div");
+    pickRow.className = "cc-row";
+    const select = document.createElement("select");
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "secondary";
+    addBtn.textContent = "+ Lägg till";
+
+    const renderChips = () => {
+      chipsWrap.innerHTML = "";
+      if (!state.selected.length) {
+        const empty = document.createElement("span");
+        empty.className = "cc-chip-empty";
+        empty.textContent = "Inga källkalendrar tillagda ännu";
+        chipsWrap.appendChild(empty);
+      }
+      state.selected.forEach((entityId) => {
+        const chip = document.createElement("span");
+        chip.className = "cc-chip";
+        chip.append(this._calendarName(entityId));
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "cc-chip-remove";
+        rm.textContent = "×";
+        rm.title = "Ta bort källa";
+        rm.onclick = () => {
+          state.selected = state.selected.filter((id) => id !== entityId);
+          renderChips();
+          renderSelect();
+        };
+        chip.appendChild(rm);
+        chipsWrap.appendChild(chip);
+      });
+    };
+
+    const renderSelect = () => {
+      select.innerHTML = "";
+      const options = this._calendars.filter((c) => !state.selected.includes(c.entity_id));
+      if (!options.length) {
+        const opt = document.createElement("option");
+        opt.textContent = "Inga fler kalendrar att lägga till";
+        opt.disabled = true;
+        select.appendChild(opt);
+        addBtn.disabled = true;
+        return;
+      }
+      addBtn.disabled = false;
+      options.forEach((cal) => {
+        const opt = document.createElement("option");
+        opt.value = cal.entity_id;
+        opt.textContent = `${cal.name} (${cal.entity_id})`;
+        select.appendChild(opt);
+      });
+    };
+
+    addBtn.onclick = () => {
+      if (select.value && !state.selected.includes(select.value)) {
+        state.selected.push(select.value);
+        renderChips();
+        renderSelect();
+      }
+    };
+
+    renderChips();
+    renderSelect();
+    pickRow.appendChild(select);
+    pickRow.appendChild(addBtn);
+    wrap.appendChild(chipsWrap);
+    wrap.appendChild(pickRow);
+
+    return { element: wrap, getSelected: () => state.selected };
+  }
+
+  _buildFilterFieldsControls(rule) {
+    rule = rule || {};
+    const wrap = document.createElement("div");
+    wrap.className = "cc-filter-fields open";
+    wrap.style.background = "transparent";
+    wrap.style.padding = "0";
+
+    const fieldSelect = document.createElement("select");
+    ["any", "summary", "description", "location"].forEach((f) => {
+      const opt = document.createElement("option");
+      opt.value = f;
+      opt.textContent = f === "any" ? "Titel + beskrivning + plats" : f;
+      if ((rule.field || "any") === f) opt.selected = true;
+      fieldSelect.appendChild(opt);
+    });
+
+    const includeInput = document.createElement("input");
+    includeInput.type = "text";
+    includeInput.placeholder = "Inkludera bara event som innehåller (t.ex. Zoo, Djurpark)";
+    includeInput.value = (rule.include || []).join(", ");
+
+    const excludeInput = document.createElement("input");
+    excludeInput.type = "text";
+    excludeInput.placeholder = "Uteslut event som innehåller (t.ex. Zoo, Privat)";
+    excludeInput.value = (rule.exclude || []).join(", ");
+
+    const regexLabel = document.createElement("label");
+    const regexCb = document.createElement("input");
+    regexCb.type = "checkbox";
+    regexCb.checked = !!rule.use_regex;
+    regexLabel.appendChild(regexCb);
+    regexLabel.append(" Tolka orden som regex-mönster");
+
+    const caseLabel = document.createElement("label");
+    const caseCb = document.createElement("input");
+    caseCb.type = "checkbox";
+    caseCb.checked = !!rule.case_sensitive;
+    caseLabel.appendChild(caseCb);
+    caseLabel.append(" Skiftlägeskänslig");
+
+    wrap.appendChild(fieldSelect);
+    wrap.appendChild(includeInput);
+    wrap.appendChild(excludeInput);
+    wrap.appendChild(regexLabel);
+    wrap.appendChild(caseLabel);
+
+    return {
+      element: wrap,
+      getValues: () => ({
+        field: fieldSelect.value,
+        include: includeInput.value,
+        exclude: excludeInput.value,
+        use_regex: regexCb.checked,
+        case_sensitive: caseCb.checked,
+      }),
+    };
+  }
+
+  _buildFeedBox(entry) {
+    const box = document.createElement("div");
+    if (!entry.feed_url) {
+      const warn = document.createElement("div");
+      warn.className = "cc-warning";
+      warn.textContent =
+        'Ingen "Home Assistant-URL" är konfigurerad (Inställningar → System → Nätverk), så länken kan inte visas fullständigt än.';
+      box.appendChild(warn);
+      return box;
+    }
+
+    const label = document.createElement("div");
+    label.style.fontSize = "12px";
+    label.style.color = "var(--secondary-text-color)";
+    label.textContent = "Prenumerationslänk (lägg till i valfri kalenderapp via \"lägg till via URL\"):";
+    box.appendChild(label);
+
+    [
+      { value: entry.feed_url, title: "https-länk" },
+      { value: entry.feed_url_webcal, title: "webcal-länk (för appar som föredrar det schemat)" },
+    ].forEach(({ value, title }) => {
+      const row = document.createElement("div");
+      row.className = "cc-feed-row";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.readOnly = true;
+      input.value = value;
+      input.title = title;
+      input.onclick = () => input.select();
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "secondary";
+      copyBtn.textContent = "Kopiera";
+      copyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          copyBtn.textContent = "Kopierad!";
+        } catch (err) {
+          input.select();
+          copyBtn.textContent = "Markerad";
+        }
+        setTimeout(() => (copyBtn.textContent = "Kopiera"), 1500);
+      };
+      row.appendChild(input);
+      row.appendChild(copyBtn);
+      box.appendChild(row);
+    });
+
+    return box;
+  }
+
+  _renderFilterBlock(entry, sourceEntityId) {
+    const key = `${entry.entry_id}::${sourceEntityId}`;
+    const box = document.createElement("div");
+    box.className = "cc-source-block";
+
+    const toggle = document.createElement("button");
+    toggle.className = "cc-filter-toggle";
+    const rule = (entry.filters || {})[sourceEntityId];
+    toggle.textContent = `${this._calendarName(sourceEntityId)} ${rule ? "(filter aktivt)" : "(inget filter)"}`;
+    box.appendChild(toggle);
+
+    const filterControls = this._buildFilterFieldsControls(rule);
+    filterControls.element.classList.remove("open");
+    filterControls.element.classList.add(this._openFilters[key] ? "open" : "");
+    filterControls.element.style.background = "";
+    filterControls.element.style.padding = "";
+
+    const actions = document.createElement("div");
+    actions.className = "cc-actions";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "Spara filter";
+    saveBtn.onclick = async () => {
+      const values = filterControls.getValues();
+      const include = values.include.split(",").map((s) => s.trim()).filter(Boolean);
+      const exclude = values.exclude.split(",").map((s) => s.trim()).filter(Boolean);
+      const filter =
+        include.length || exclude.length
+          ? { field: values.field, include, exclude, use_regex: values.use_regex, case_sensitive: values.case_sensitive }
+          : null;
+      await this._hass.callWS({
+        type: "cal_combiner/update_filter",
+        entry_id: entry.entry_id,
+        source_entity_id: sourceEntityId,
+        filter,
+      });
+      this._openFilters[key] = true;
+      await this._reload();
+    };
+
+    const clearBtn = document.createElement("button");
+    clearBtn.className = "secondary";
+    clearBtn.textContent = "Ta bort filter";
+    clearBtn.onclick = async () => {
+      await this._hass.callWS({
+        type: "cal_combiner/update_filter",
+        entry_id: entry.entry_id,
+        source_entity_id: sourceEntityId,
+        filter: null,
+      });
+      await this._reload();
+    };
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(clearBtn);
+    filterControls.element.appendChild(actions);
+
+    toggle.onclick = () => {
+      this._openFilters[key] = !this._openFilters[key];
+      filterControls.element.classList.toggle("open", this._openFilters[key]);
+    };
+
+    box.appendChild(filterControls.element);
+    return box;
+  }
+
+  // ---- calendars tab ----
+
+  _renderEntryCard(entry) {
+    const card = document.createElement("div");
+    card.className = "cc-card";
+
+    const header = document.createElement("div");
+    header.className = "cc-card-header";
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", entry.icon || "mdi:calendar-multiple");
+    header.appendChild(icon);
+    if (entry.picture) {
+      const avatar = document.createElement("img");
+      avatar.className = "cc-avatar";
+      avatar.src = entry.picture;
+      header.appendChild(avatar);
+    }
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "cc-name";
+    nameInput.value = entry.name;
+    header.appendChild(nameInput);
+    card.appendChild(header);
+
+    const ownBox = document.createElement("div");
+    ownBox.className = "cc-own-box";
+    ownBox.innerHTML = `<ha-icon icon="mdi:pencil-circle"></ha-icon>`;
+    const ownText = document.createElement("span");
+    ownText.textContent = entry.own_entity_id
+      ? `Nya event skrivs automatiskt till "${entry.own_entity_name}" (${entry.own_entity_id})`
+      : "Kalendern skapar sin egen skrivbara kalender automatiskt.";
+    ownBox.appendChild(ownText);
+    card.appendChild(ownBox);
+
+    const iconLabel = document.createElement("div");
+    iconLabel.className = "cc-section-title";
+    iconLabel.textContent = "Ikon";
+    card.appendChild(iconLabel);
+    const iconPicker = this._buildIconPicker(entry.icon);
+    card.appendChild(iconPicker.element);
+
+    const pictureLabel = document.createElement("div");
+    pictureLabel.className = "cc-section-title";
+    pictureLabel.textContent = "Bild";
+    card.appendChild(pictureLabel);
+    const picturePicker = this._buildPicturePicker(entry.picture);
+    card.appendChild(picturePicker.element);
+
+    const sourcesLabel = document.createElement("div");
+    sourcesLabel.className = "cc-section-title";
+    sourcesLabel.textContent = "Extra källkalendrar att slå ihop";
+    card.appendChild(sourcesLabel);
+    const sourcePicker = this._buildSourcePicker(entry.sources);
+    card.appendChild(sourcePicker.element);
+
+    const errorBox = document.createElement("div");
+    errorBox.className = "cc-error";
+    card.appendChild(errorBox);
+
+    const actions = document.createElement("div");
+    actions.className = "cc-actions";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "Spara";
+    saveBtn.onclick = async () => {
+      errorBox.textContent = "";
+      try {
+        await this._hass.callWS({
+          type: "cal_combiner/update_entry",
+          entry_id: entry.entry_id,
+          name: nameInput.value || entry.name,
+          sources: sourcePicker.getSelected(),
+          icon: iconPicker.getValue(),
+          picture: picturePicker.getValue(),
+        });
+        await this._reload();
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte spara ändringarna";
+      }
+    };
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "danger";
+    deleteBtn.textContent = "Ta bort kalender";
+    deleteBtn.onclick = async () => {
+      if (!confirm(`Ta bort "${entry.name}" och dess egen kalender? Detta går inte att ångra.`)) return;
+      await this._hass.callWS({ type: "cal_combiner/delete_entry", entry_id: entry.entry_id });
+      await this._reload();
+    };
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(deleteBtn);
+    card.appendChild(actions);
+
+    const filterHeader = document.createElement("div");
+    filterHeader.className = "cc-section-title";
+    filterHeader.textContent = "Filter per källa";
+    card.appendChild(filterHeader);
+    entry.sources.forEach((sourceId) => card.appendChild(this._renderFilterBlock(entry, sourceId)));
+
+    const feedLabel = document.createElement("div");
+    feedLabel.className = "cc-section-title";
+    feedLabel.textContent = "Dela kalendern";
+    card.appendChild(feedLabel);
+    card.appendChild(this._buildFeedBox(entry));
+
+    return card;
+  }
+
+  _renderNewEntryCard() {
+    const card = document.createElement("div");
+    card.className = "cc-card cc-new-card";
+
+    const title = document.createElement("div");
+    title.className = "cc-section-title";
+    title.textContent = "Skapa ny sammanslagen kalender";
+    card.appendChild(title);
+
+    const nameRow = document.createElement("div");
+    nameRow.className = "cc-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Namn, t.ex. Familj eller Jobb";
+    nameRow.appendChild(nameInput);
+    card.appendChild(nameRow);
+
+    const iconLabel = document.createElement("div");
+    iconLabel.className = "cc-section-title";
+    iconLabel.textContent = "Ikon";
+    card.appendChild(iconLabel);
+    const iconPicker = this._buildIconPicker("");
+    card.appendChild(iconPicker.element);
+
+    const pictureLabel = document.createElement("div");
+    pictureLabel.className = "cc-section-title";
+    pictureLabel.textContent = "Bild";
+    card.appendChild(pictureLabel);
+    const picturePicker = this._buildPicturePicker("");
+    card.appendChild(picturePicker.element);
+
+    const sourcesLabel = document.createElement("div");
+    sourcesLabel.className = "cc-section-title";
+    sourcesLabel.textContent = "Extra källkalendrar (valfritt, går att lägga till senare)";
+    card.appendChild(sourcesLabel);
+    const sourcePicker = this._buildSourcePicker([]);
+    card.appendChild(sourcePicker.element);
+
+    const errorBox = document.createElement("div");
+    errorBox.className = "cc-error";
+    card.appendChild(errorBox);
+
+    const createBtn = document.createElement("button");
+    createBtn.textContent = "Skapa kalender";
+    createBtn.onclick = async () => {
+      errorBox.textContent = "";
+      if (!nameInput.value.trim()) {
+        errorBox.textContent = "Ange ett namn";
+        return;
+      }
+      try {
+        await this._hass.callWS({
+          type: "cal_combiner/create_entry",
+          name: nameInput.value.trim(),
+          sources: sourcePicker.getSelected(),
+          icon: iconPicker.getValue(),
+          picture: picturePicker.getValue(),
+        });
+        await this._reload();
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte skapa kalendern";
+      }
+    };
+    card.appendChild(createBtn);
+
+    return card;
+  }
+
+  // ---- sensors tab ----
+
+  _buildTriggerModeSelect(value) {
+    const select = document.createElement("select");
+    [
+      { value: "active_now", label: "Ett event pågår just nu" },
+      { value: "today", label: "Ett event inträffar någon gång idag" },
+    ].forEach(({ value: v, label }) => {
+      const opt = document.createElement("option");
+      opt.value = v;
+      opt.textContent = label;
+      if ((value || "active_now") === v) opt.selected = true;
+      select.appendChild(opt);
+    });
+    return select;
+  }
+
+  _renderActivitySensorCard(sensorEntry) {
+    const card = document.createElement("div");
+    card.className = "cc-card";
+
+    const header = document.createElement("div");
+    header.className = "cc-card-header";
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", sensorEntry.icon || "mdi:calendar-check");
+    header.appendChild(icon);
+    if (sensorEntry.picture) {
+      const avatar = document.createElement("img");
+      avatar.className = "cc-avatar";
+      avatar.src = sensorEntry.picture;
+      header.appendChild(avatar);
+    }
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "cc-name";
+    nameInput.value = sensorEntry.name;
+    header.appendChild(nameInput);
+    card.appendChild(header);
+
+    const iconLabel = document.createElement("div");
+    iconLabel.className = "cc-section-title";
+    iconLabel.textContent = "Ikon";
+    card.appendChild(iconLabel);
+    const iconPicker = this._buildIconPicker(sensorEntry.icon);
+    card.appendChild(iconPicker.element);
+
+    const pictureLabel = document.createElement("div");
+    pictureLabel.className = "cc-section-title";
+    pictureLabel.textContent = "Bild";
+    card.appendChild(pictureLabel);
+    const picturePicker = this._buildPicturePicker(sensorEntry.picture);
+    card.appendChild(picturePicker.element);
+
+    const sourcesLabel = document.createElement("div");
+    sourcesLabel.className = "cc-section-title";
+    sourcesLabel.textContent = "Källkalendrar";
+    card.appendChild(sourcesLabel);
+    const sourcePicker = this._buildSourcePicker(sensorEntry.sources);
+    card.appendChild(sourcePicker.element);
+
+    const filterLabel = document.createElement("div");
+    filterLabel.className = "cc-section-title";
+    filterLabel.textContent = "Filter";
+    card.appendChild(filterLabel);
+    const filterControls = this._buildFilterFieldsControls(sensorEntry.filter);
+    card.appendChild(filterControls.element);
+
+    const triggerLabel = document.createElement("div");
+    triggerLabel.className = "cc-section-title";
+    triggerLabel.textContent = 'binary_sensor ska vara "på" när...';
+    card.appendChild(triggerLabel);
+    const triggerRow = document.createElement("div");
+    triggerRow.className = "cc-row";
+    const triggerSelect = this._buildTriggerModeSelect(sensorEntry.trigger_mode);
+    triggerRow.appendChild(triggerSelect);
+    card.appendChild(triggerRow);
+
+    const sensorTypeLabel = document.createElement("div");
+    sensorTypeLabel.className = "cc-section-title";
+    sensorTypeLabel.textContent = "Sensor-typer att skapa";
+    card.appendChild(sensorTypeLabel);
+    const sensorTypeRow = document.createElement("div");
+    sensorTypeRow.className = "cc-row";
+    const binaryLabel = document.createElement("label");
+    const binaryCb = document.createElement("input");
+    binaryCb.type = "checkbox";
+    binaryCb.checked = sensorEntry.create_binary_sensor;
+    binaryLabel.appendChild(binaryCb);
+    binaryLabel.append(" binary_sensor (på/av)");
+    const sensorLabel = document.createElement("label");
+    const sensorCb = document.createElement("input");
+    sensorCb.type = "checkbox";
+    sensorCb.checked = sensorEntry.create_sensor;
+    sensorLabel.appendChild(sensorCb);
+    sensorLabel.append(" sensor (aktuellt/nästa event)");
+    sensorTypeRow.appendChild(binaryLabel);
+    sensorTypeRow.appendChild(sensorLabel);
+    card.appendChild(sensorTypeRow);
+
+    const errorBox = document.createElement("div");
+    errorBox.className = "cc-error";
+    card.appendChild(errorBox);
+
+    const actions = document.createElement("div");
+    actions.className = "cc-actions";
+
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "Spara";
+    saveBtn.onclick = async () => {
+      errorBox.textContent = "";
+      const selectedSources = sourcePicker.getSelected();
+      const values = filterControls.getValues();
+      try {
+        await this._hass.callWS({
+          type: "cal_combiner/update_activity_sensor",
+          entry_id: sensorEntry.entry_id,
+          name: nameInput.value || sensorEntry.name,
+          sources: selectedSources,
+          icon: iconPicker.getValue(),
+          picture: picturePicker.getValue(),
+          field: values.field,
+          include: values.include,
+          exclude: values.exclude,
+          use_regex: values.use_regex,
+          case_sensitive: values.case_sensitive,
+          trigger_mode: triggerSelect.value,
+          create_binary_sensor: binaryCb.checked,
+          create_sensor: sensorCb.checked,
+        });
+        await this._reload();
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte spara ändringarna";
+      }
+    };
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "danger";
+    deleteBtn.textContent = "Ta bort sensor";
+    deleteBtn.onclick = async () => {
+      if (!confirm(`Ta bort "${sensorEntry.name}"? Detta går inte att ångra.`)) return;
+      await this._hass.callWS({ type: "cal_combiner/delete_entry", entry_id: sensorEntry.entry_id });
+      await this._reload();
+    };
+
+    actions.appendChild(saveBtn);
+    actions.appendChild(deleteBtn);
+    card.appendChild(actions);
+
+    return card;
+  }
+
+  _renderNewActivitySensorCard() {
+    const card = document.createElement("div");
+    card.className = "cc-card cc-new-card";
+
+    const title = document.createElement("div");
+    title.className = "cc-section-title";
+    title.textContent = "Skapa ny aktivitetssensor";
+    card.appendChild(title);
+
+    const nameRow = document.createElement("div");
+    nameRow.className = "cc-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.placeholder = "Namn, t.ex. Zoo-besök";
+    nameRow.appendChild(nameInput);
+    card.appendChild(nameRow);
+
+    const iconLabel = document.createElement("div");
+    iconLabel.className = "cc-section-title";
+    iconLabel.textContent = "Ikon";
+    card.appendChild(iconLabel);
+    const iconPicker = this._buildIconPicker("");
+    card.appendChild(iconPicker.element);
+
+    const pictureLabel = document.createElement("div");
+    pictureLabel.className = "cc-section-title";
+    pictureLabel.textContent = "Bild";
+    card.appendChild(pictureLabel);
+    const picturePicker = this._buildPicturePicker("");
+    card.appendChild(picturePicker.element);
+
+    const sourcesLabel = document.createElement("div");
+    sourcesLabel.className = "cc-section-title";
+    sourcesLabel.textContent = "Källkalendrar";
+    card.appendChild(sourcesLabel);
+    const sourcePicker = this._buildSourcePicker([]);
+    card.appendChild(sourcePicker.element);
+
+    const filterLabel = document.createElement("div");
+    filterLabel.className = "cc-section-title";
+    filterLabel.textContent = "Filter";
+    card.appendChild(filterLabel);
+    const filterControls = this._buildFilterFieldsControls({});
+    card.appendChild(filterControls.element);
+
+    const triggerLabel = document.createElement("div");
+    triggerLabel.className = "cc-section-title";
+    triggerLabel.textContent = 'binary_sensor ska vara "på" när...';
+    card.appendChild(triggerLabel);
+    const triggerRow = document.createElement("div");
+    triggerRow.className = "cc-row";
+    const triggerSelect = this._buildTriggerModeSelect("active_now");
+    triggerRow.appendChild(triggerSelect);
+    card.appendChild(triggerRow);
+
+    const sensorTypeLabel = document.createElement("div");
+    sensorTypeLabel.className = "cc-section-title";
+    sensorTypeLabel.textContent = "Sensor-typer att skapa";
+    card.appendChild(sensorTypeLabel);
+    const sensorTypeRow = document.createElement("div");
+    sensorTypeRow.className = "cc-row";
+    const binaryLabel = document.createElement("label");
+    const binaryCb = document.createElement("input");
+    binaryCb.type = "checkbox";
+    binaryCb.checked = true;
+    binaryLabel.appendChild(binaryCb);
+    binaryLabel.append(" binary_sensor (på/av)");
+    const sensorLabel = document.createElement("label");
+    const sensorCb = document.createElement("input");
+    sensorCb.type = "checkbox";
+    sensorCb.checked = true;
+    sensorLabel.appendChild(sensorCb);
+    sensorLabel.append(" sensor (aktuellt/nästa event)");
+    sensorTypeRow.appendChild(binaryLabel);
+    sensorTypeRow.appendChild(sensorLabel);
+    card.appendChild(sensorTypeRow);
+
+    const errorBox = document.createElement("div");
+    errorBox.className = "cc-error";
+    card.appendChild(errorBox);
+
+    const createBtn = document.createElement("button");
+    createBtn.textContent = "Skapa sensor";
+    createBtn.onclick = async () => {
+      errorBox.textContent = "";
+      const selectedSources = sourcePicker.getSelected();
+      if (!nameInput.value.trim()) {
+        errorBox.textContent = "Ange ett namn";
+        return;
+      }
+      if (!selectedSources.length) {
+        errorBox.textContent = "Välj minst en källkalender";
+        return;
+      }
+      if (!binaryCb.checked && !sensorCb.checked) {
+        errorBox.textContent = "Välj minst en sensor-typ";
+        return;
+      }
+      const values = filterControls.getValues();
+      try {
+        await this._hass.callWS({
+          type: "cal_combiner/create_activity_sensor",
+          name: nameInput.value.trim(),
+          sources: selectedSources,
+          icon: iconPicker.getValue(),
+          picture: picturePicker.getValue(),
+          field: values.field,
+          include: values.include,
+          exclude: values.exclude,
+          use_regex: values.use_regex,
+          case_sensitive: values.case_sensitive,
+          trigger_mode: triggerSelect.value,
+          create_binary_sensor: binaryCb.checked,
+          create_sensor: sensorCb.checked,
+        });
+        await this._reload();
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte skapa sensorn";
+      }
+    };
+    card.appendChild(createBtn);
+
+    return card;
+  }
+}
+
+customElements.define("cal-combiner-panel", CalCombinerPanel);

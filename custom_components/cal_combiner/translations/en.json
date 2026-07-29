@@ -1,0 +1,112 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "menu_options": {
+          "merge_calendar": "Merged calendar",
+          "activity_sensor": "Activity sensor"
+        }
+      },
+      "merge_calendar": {
+        "title": "Create merged calendar",
+        "description": "Cal Combiner automatically creates its own calendar that new events are written to by default. You can add more source calendars now or later in the panel.",
+        "data": {
+          "name": "Name",
+          "sources": "Extra source calendars to merge in (optional, can be added later)",
+          "icon": "Icon",
+          "picture": "Picture"
+        }
+      },
+      "activity_sensor": {
+        "title": "Create activity sensor",
+        "description": "Creates sensors showing whether a filtered event is happening right now / what's next. Leave include/exclude empty for no filtering.",
+        "data": {
+          "name": "Name",
+          "sources": "Source calendars (select multiple)",
+          "icon": "Icon",
+          "picture": "Picture",
+          "field": "Field to match against",
+          "include": "Only include events containing (e.g. Zoo, Petting Zoo)",
+          "exclude": "Exclude events containing (e.g. Zoo, Private)",
+          "use_regex": "Treat the words as regex patterns",
+          "case_sensitive": "Case sensitive",
+          "trigger_mode": "The sensor should be \"on\" when",
+          "create_binary_sensor": "Create binary_sensor (on/off)",
+          "create_sensor": "Create sensor (shows current/next event)"
+        }
+      }
+    },
+    "error": {
+      "no_sources": "Select at least one source calendar",
+      "no_sensor_type": "Select at least one sensor type (binary_sensor and/or sensor)"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "edit_sources": "Edit source calendars",
+          "edit_filters": "Edit filters per source",
+          "edit_appearance": "Icon and picture"
+        }
+      },
+      "edit_sources": {
+        "data": {
+          "sources": "Extra source calendars (in addition to the own calendar, which is always included)"
+        }
+      },
+      "edit_appearance": {
+        "title": "Icon and picture",
+        "data": {
+          "icon": "Icon",
+          "picture": "Picture"
+        }
+      },
+      "edit_filters": {
+        "title": "Choose a source to filter",
+        "data": {
+          "source": "Source calendar"
+        }
+      },
+      "filter_rules": {
+        "title": "Filter for {entity_id}",
+        "description": "Leave both fields empty to remove the filter. Separate multiple words with commas.",
+        "data": {
+          "field": "Field to match against",
+          "include": "Only include events containing (e.g. Zoo, Petting Zoo)",
+          "exclude": "Exclude events containing (e.g. Zoo, Private)",
+          "case_sensitive": "Case sensitive",
+          "use_regex": "Treat the words as regex patterns instead of plain text"
+        }
+      },
+      "edit_activity_sensor": {
+        "title": "Edit activity sensor",
+        "data": {
+          "name": "Name",
+          "sources": "Source calendars (select multiple)",
+          "icon": "Icon",
+          "picture": "Picture",
+          "field": "Field to match against",
+          "include": "Only include events containing (e.g. Zoo, Petting Zoo)",
+          "exclude": "Exclude events containing (e.g. Zoo, Private)",
+          "use_regex": "Treat the words as regex patterns",
+          "case_sensitive": "Case sensitive",
+          "trigger_mode": "The sensor should be \"on\" when",
+          "create_binary_sensor": "Create binary_sensor (on/off)",
+          "create_sensor": "Create sensor (shows current/next event)"
+        }
+      }
+    },
+    "abort": {
+      "no_sources": "Add at least one source calendar under \"Edit sources\" before setting filters"
+    }
+  },
+  "selector": {
+    "trigger_mode": {
+      "options": {
+        "active_now": "An event is happening right now",
+        "today": "An event happens at some point today"
+      }
+    }
+  }
+}
