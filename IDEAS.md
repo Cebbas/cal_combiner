@@ -4,9 +4,9 @@
 - [x] Slå ihop flera kalender-entiteter (Google/CalDAV/lokal/iCal-URL) till en kalender
 - [x] Syns i Home Assistants inbyggda kalendervy
 - [x] Prenumererbar ICS-länk (webcal://) för valfri kalenderapp, skyddad med hemlig token
-- [x] Skapa nya events via den sammanslagna kalendern (skrivs till kalenderns egen, automatiskt skapade kalender)
+- [x] Skapa nya events via den sammanslagna kalendern (sparas direkt på den, inget separat "Local Calendar"-steg krävs)
 - [x] Stöd för flera separata sammanslagna kalendrar (en integrationsinstans per kalender)
-- [x] Varje sammanslagen kalender skapar automatiskt sin egen skrivbara kalender som standard-skrivmål – inget separat "Local Calendar"-steg krävs längre
+- [x] En enda kalenderentitet per sammanslagen kalender – den visar det sammanslagna resultatet OCH äger de event du skapar direkt på den (tidigare skapades en dold, förvirrande andra "(egen)"-entitet för det ändamålet, borttagen)
 - [x] Man behöver inte välja/skapa någon kalender alls för att lägga till en aktivitetssensor
 
 ## Filter per källa

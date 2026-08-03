@@ -10,7 +10,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_FILTERS, CONF_NAME, CONF_SOURCES, CONF_TOKEN, DOMAIN
+from .const import CONF_NAME, CONF_TOKEN, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = "cal_combiner_feed_view_registered"
@@ -34,11 +34,11 @@ class CalendarMergeFeedView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request, entry_id, token):
-        from .calendar import fetch_merged_events  # local import avoids circular import
+        from .calendar import fetch_all_events  # local import avoids circular import
 
         entries = self.hass.data.get(DOMAIN, {})
         entry_data = entries.get(entry_id)
-        if not entry_data:
+        if not entry_data or "own_store" not in entry_data:
             return web.Response(status=404)
 
         entry = entry_data["entry"]
@@ -46,12 +46,12 @@ class CalendarMergeFeedView(HomeAssistantView):
             return web.Response(status=403)
 
         now = dt_util.now()
-        events, _failed = await fetch_merged_events(
+        events, _failed = await fetch_all_events(
             self.hass,
-            entry.data[CONF_SOURCES],
+            entry,
+            entry_data["own_store"],
             now - timedelta(days=60),
             now + timedelta(days=365),
-            entry.data.get(CONF_FILTERS, {}),
         )
         ics = _build_ics(entry.data.get(CONF_NAME, "Merged Calendar"), events)
         return web.Response(

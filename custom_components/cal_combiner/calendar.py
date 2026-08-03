@@ -15,16 +15,21 @@ from homeassistant.components.calendar import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_FILTERS, CONF_ICON, CONF_NAME, CONF_PICTURE, CONF_SOURCES, DEFAULT_MERGE_ICON, DOMAIN
-from .own_calendar import async_setup_own_entity
+from .own_calendar import OwnCalendarStore
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(minutes=5)
 UID_SEPARATOR = "::"
+# Marks a merged uid as belonging to the calendar's own store rather than an
+# external source entity_id (which can never collide with this, since entity
+# ids always contain a domain and a dot, e.g. "calendar.foo").
+OWN_SOURCE_MARKER = "__own__"
 
 
 def _extract_field_text(item: dict, field: str) -> str:
@@ -65,12 +70,6 @@ def _matches_filter(item: dict, rule: dict | None) -> bool:
         return False
 
     return True
-
-
-def merged_sources(entry: ConfigEntry, own_entity_id: str) -> list[str]:
-    """The entry's own calendar is always merged in, plus any extra sources picked by the user."""
-    extra = [s for s in entry.data.get(CONF_SOURCES, []) if s != own_entity_id]
-    return [own_entity_id, *extra]
 
 
 def _parse_merged_uid(merged_uid: str) -> tuple[str, str] | None:
@@ -145,6 +144,28 @@ async def fetch_merged_events(
     return events, failed
 
 
+async def fetch_all_events(
+    hass: HomeAssistant, entry: ConfigEntry, store: OwnCalendarStore, start, end
+) -> tuple[list[CalendarEvent], list[str]]:
+    """Combine this entry's own stored events with its external sources."""
+    own_events = [
+        CalendarEvent(
+            start=e.start,
+            end=e.end,
+            summary=e.summary,
+            description=e.description,
+            location=e.location,
+            uid=f"{OWN_SOURCE_MARKER}{UID_SEPARATOR}{e.uid}",
+        )
+        for e in store.events_in_range(start, end)
+    ]
+    external_events, failed = await fetch_merged_events(
+        hass, entry.data.get(CONF_SOURCES, []), start, end, entry.data.get(CONF_FILTERS, {})
+    )
+    events = sorted(own_events + external_events, key=lambda e: str(e.start))
+    return events, failed
+
+
 def _notify_failed_sources(hass: HomeAssistant, entry: ConfigEntry, failed: list[str]) -> None:
     persistent_notification.async_create(
         hass,
@@ -162,33 +183,46 @@ def _dismiss_failed_notification(hass: HomeAssistant, entry: ConfigEntry) -> Non
     persistent_notification.async_dismiss(hass, f"cal_combiner_failed_{entry.entry_id}")
 
 
+def _remove_stale_own_entity(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the leftover separate "(egen)" entity earlier versions created.
+
+    The own calendar's events now live directly on the merged entity, so the
+    second entity_registry entry (if any, from before this change) is dead
+    weight - remove it so it doesn't linger as "unavailable".
+    """
+    ent_reg = er.async_get(hass)
+    old_entity_id = ent_reg.async_get_entity_id("calendar", DOMAIN, f"{entry.entry_id}_own")
+    if old_entity_id:
+        ent_reg.async_remove(old_entity_id)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    own_entity = await async_setup_own_entity(hass, entry, async_add_entities)
-    own_entity_id = own_entity.entity_id
-    hass.data[DOMAIN][entry.entry_id]["own_entity_id"] = own_entity_id
+    _remove_stale_own_entity(hass, entry)
 
-    coordinator = MergedCalendarCoordinator(hass, entry, own_entity_id)
+    store = OwnCalendarStore(hass, entry.entry_id)
+    await store.async_load()
+    hass.data[DOMAIN][entry.entry_id]["own_store"] = store
+
+    coordinator = MergedCalendarCoordinator(hass, entry, store)
     await coordinator.async_config_entry_first_refresh()
-    async_add_entities([MergedCalendarEntity(coordinator, entry, own_entity_id)])
+    async_add_entities([MergedCalendarEntity(coordinator, entry, store)])
 
 
 class MergedCalendarCoordinator(DataUpdateCoordinator):
     """Polls all sources periodically so the entity state stays fresh."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, own_entity_id: str) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, store: OwnCalendarStore) -> None:
         super().__init__(hass, _LOGGER, name="cal_combiner", update_interval=SCAN_INTERVAL)
         self.entry = entry
-        self._own_entity_id = own_entity_id
+        self._store = store
         self._last_failed: set[str] = set()
 
     async def _async_update_data(self):
-        sources = merged_sources(self.entry, self._own_entity_id)
-        filters = self.entry.data.get(CONF_FILTERS, {})
         now = dt_util.now()
-        events, failed = await fetch_merged_events(
-            self.hass, sources, now - timedelta(days=1), now + timedelta(days=30), filters
+        events, failed = await fetch_all_events(
+            self.hass, self.entry, self._store, now - timedelta(days=1), now + timedelta(days=30)
         )
 
         failed_set = set(failed)
@@ -202,7 +236,7 @@ class MergedCalendarCoordinator(DataUpdateCoordinator):
 
 
 class MergedCalendarEntity(CoordinatorEntity, CalendarEntity):
-    """A single calendar entity that represents multiple merged calendars."""
+    """A single calendar entity: shows merged events and owns the events created on it directly."""
 
     _attr_has_entity_name = True
     _attr_supported_features = (
@@ -211,10 +245,10 @@ class MergedCalendarEntity(CoordinatorEntity, CalendarEntity):
         | CalendarEntityFeature.UPDATE_EVENT
     )
 
-    def __init__(self, coordinator: MergedCalendarCoordinator, entry: ConfigEntry, own_entity_id: str) -> None:
+    def __init__(self, coordinator: MergedCalendarCoordinator, entry: ConfigEntry, store: OwnCalendarStore) -> None:
         super().__init__(coordinator)
         self._entry = entry
-        self._own_entity_id = own_entity_id
+        self._store = store
         self._attr_unique_id = entry.entry_id
         self._attr_name = entry.data.get(CONF_NAME, "Merged Calendar")
 
@@ -240,45 +274,42 @@ class MergedCalendarEntity(CoordinatorEntity, CalendarEntity):
         return {"failed_sources": failed} if failed else {}
 
     async def async_get_events(self, hass, start_date, end_date) -> list[CalendarEvent]:
-        events, _failed = await fetch_merged_events(
-            hass,
-            merged_sources(self._entry, self._own_entity_id),
-            start_date,
-            end_date,
-            self._entry.data.get(CONF_FILTERS, {}),
-        )
+        events, _failed = await fetch_all_events(hass, self._entry, self._store, start_date, end_date)
         return events
 
     async def async_create_event(self, **kwargs) -> None:
-        """New events created from the merged calendar get written to its own auto-created calendar."""
-        own = _get_source_entity(self.hass, self._own_entity_id)
-        if own is None:
-            raise HomeAssistantError("Den egna kalendern hittades inte")
-        await own.async_create_event(**kwargs)
+        """New events created from the merged calendar are stored directly."""
+        await self._store.async_create_event(**kwargs)
         await self.coordinator.async_request_refresh()
 
     async def async_update_event(
         self, uid: str, event: dict, recurrence_id: str | None = None, recurrence_range: str | None = None
     ) -> None:
-        entity_id, orig_uid = self._resolve_uid(uid, action="redigera")
-        source = _get_source_entity(self.hass, entity_id)
-        if source is None:
-            raise HomeAssistantError(f"Källkalendern {entity_id} hittades inte")
-        await source.async_update_event(
-            orig_uid, event, recurrence_id=recurrence_id, recurrence_range=recurrence_range
-        )
+        marker, orig_uid = self._resolve_uid(uid, action="redigera")
+        if marker == OWN_SOURCE_MARKER:
+            await self._store.async_update_event(orig_uid, event)
+        else:
+            source = _get_source_entity(self.hass, marker)
+            if source is None:
+                raise HomeAssistantError(f"Källkalendern {marker} hittades inte")
+            await source.async_update_event(
+                orig_uid, event, recurrence_id=recurrence_id, recurrence_range=recurrence_range
+            )
         await self.coordinator.async_request_refresh()
 
     async def async_delete_event(
         self, uid: str, recurrence_id: str | None = None, recurrence_range: str | None = None
     ) -> None:
-        entity_id, orig_uid = self._resolve_uid(uid, action="ta bort")
-        source = _get_source_entity(self.hass, entity_id)
-        if source is None:
-            raise HomeAssistantError(f"Källkalendern {entity_id} hittades inte")
-        await source.async_delete_event(
-            orig_uid, recurrence_id=recurrence_id, recurrence_range=recurrence_range
-        )
+        marker, orig_uid = self._resolve_uid(uid, action="ta bort")
+        if marker == OWN_SOURCE_MARKER:
+            await self._store.async_delete_event(orig_uid)
+        else:
+            source = _get_source_entity(self.hass, marker)
+            if source is None:
+                raise HomeAssistantError(f"Källkalendern {marker} hittades inte")
+            await source.async_delete_event(
+                orig_uid, recurrence_id=recurrence_id, recurrence_range=recurrence_range
+            )
         await self.coordinator.async_request_refresh()
 
     @staticmethod

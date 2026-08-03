@@ -35,16 +35,7 @@ def _feed_url(hass: HomeAssistant, entry) -> str | None:
     return f"{base_url}{path}"
 
 
-def _own_entity_id(hass: HomeAssistant, entry) -> str | None:
-    return hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get("own_entity_id")
-
-
 def _entry_to_dict(hass: HomeAssistant, entry) -> dict:
-    own_entity_id = _own_entity_id(hass, entry)
-    own_name = None
-    if own_entity_id:
-        state = hass.states.get(own_entity_id)
-        own_name = state.attributes.get("friendly_name") if state else own_entity_id
     feed_url = _feed_url(hass, entry)
     return {
         "entry_id": entry.entry_id,
@@ -53,8 +44,6 @@ def _entry_to_dict(hass: HomeAssistant, entry) -> dict:
         "icon": entry.data.get(CONF_ICON),
         "picture": entry.data.get(CONF_PICTURE),
         "filters": entry.data.get(CONF_FILTERS, {}),
-        "own_entity_id": own_entity_id,
-        "own_entity_name": own_name,
         "feed_url": feed_url,
         "feed_url_webcal": feed_url.replace("https://", "webcal://").replace("http://", "webcal://")
         if feed_url
@@ -78,15 +67,9 @@ async def ws_list_entries(hass: HomeAssistant, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list_calendars"})
 @websocket_api.async_response
 async def ws_list_calendars(hass: HomeAssistant, connection, msg):
-    own_entity_ids = {
-        eid
-        for e in hass.config_entries.async_entries(DOMAIN)
-        if (eid := _own_entity_id(hass, e))
-    }
     calendars = [
         {"entity_id": state.entity_id, "name": state.attributes.get("friendly_name", state.entity_id)}
         for state in hass.states.async_all("calendar")
-        if state.entity_id not in own_entity_ids
     ]
     calendars.sort(key=lambda c: c["name"])
     connection.send_result(msg["id"], {"calendars": calendars})
@@ -138,12 +121,9 @@ async def ws_update_entry(hass: HomeAssistant, connection, msg):
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
 
-    own_entity_id = _own_entity_id(hass, entry)
-    sources = [s for s in msg["sources"] if s != own_entity_id]
-
     new_data = dict(entry.data)
     new_data[CONF_NAME] = msg["name"]
-    new_data[CONF_SOURCES] = sources
+    new_data[CONF_SOURCES] = msg["sources"]
     new_data[CONF_ICON] = msg.get("icon")
     new_data[CONF_PICTURE] = msg.get("picture")
     hass.config_entries.async_update_entry(entry, data=new_data, title=msg["name"])

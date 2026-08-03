@@ -34,10 +34,11 @@ Inställningar → Enheter & tjänster → Lägg till integration → **Cal Comb
   `calendar.*`-entiteter senare i sidopanelen
 - **Ikon/bild**: valfritt, går även att ändra senare
 
-Det finns inget "skrivmål" att välja längre: varje sammanslagen kalender
-skapar automatiskt sin egen kalender (`<namn> (egen)`) som alla nya event du
-lägger till hamnar i, och den ingår alltid automatiskt bland källorna som
-slås ihop – så egna event du skapar dyker upp i den sammanslagna vyn direkt.
+Det finns inget "skrivmål" att välja längre och ingen separat kalenderentitet
+att hålla reda på: den sammanslagna kalendern *är* skrivmålet. Nya event du
+lägger till (i panelen, i HA:s kalendervy eller via `calendar.create_event`)
+sparas direkt på den, sida vid sida med de sammanslagna eventen från dina
+källkalendrar.
 
 Vill du slå ihop en extern iCal-URL (t.ex. en skolkalender)? Lägg till den
 först som en egen källa via Inställningar → Enheter & tjänster → Lägg till
@@ -106,8 +107,9 @@ Aktivitetssensor.
 ## 5. Redigera och ta bort event
 
 Du kan redigera och ta bort event direkt från den sammanslagna kalendern
-(t.ex. via HA:s kalendervy) – ändringen skickas automatiskt vidare till rätt
-källkalender (eller till kalenderns egen kalender, om eventet skapades där).
+(t.ex. via HA:s kalendervy) – event som kommer från en källkalender skickas
+automatiskt vidare dit, medan event du skapat direkt på den sammanslagna
+kalendern uppdateras/tas bort på plats.
 
 ## 6. Filtrera event per källa
 
@@ -156,7 +158,7 @@ custom_components/
   cal_combiner/
     __init__.py       # setup, ICS-länk-notis, registrerar panel + ws-api
     calendar.py         # sammanslagen kalender-entitet + delad filterlogik
-    own_calendar.py        # den egna, automatiskt skapade kalendern varje merge äger
+    own_calendar.py        # lagring för de event varje sammanslagen kalender äger direkt
     activity.py               # delad coordinator + tidshjälpfunktioner för aktivitetssensorer
     binary_sensor.py             # aktivitetssensor: på/av (nu eller idag)
     sensor.py                      # aktivitetssensor: aktuellt/nästa event

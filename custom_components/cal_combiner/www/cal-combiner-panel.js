@@ -673,9 +673,8 @@ class CalCombinerPanel extends HTMLElement {
     ownBox.className = "cc-own-box";
     ownBox.innerHTML = `<ha-icon icon="mdi:pencil-circle"></ha-icon>`;
     const ownText = document.createElement("span");
-    ownText.textContent = entry.own_entity_id
-      ? `Nya event skrivs automatiskt till "${entry.own_entity_name}" (${entry.own_entity_id})`
-      : "Kalendern skapar sin egen skrivbara kalender automatiskt.";
+    ownText.textContent =
+      "Nya event du lägger till här (eller via HA:s kalendervy) sparas direkt i den här kalendern.";
     ownBox.appendChild(ownText);
     card.appendChild(ownBox);
 
