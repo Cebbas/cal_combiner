@@ -35,6 +35,10 @@
 - [x] `sensor`: state = aktuellt/nästa matchande event + attribut (antal idag, plats, start/slut)
 - [x] Hanterbara via både sidopanelen och vanliga Inställningar → Enheter & tjänster
 - [ ] Fler sensor-typer, t.ex. "minuter kvar till nästa match" eller "antal matchande event denna vecka"
+- [ ] "Life event"-liknande sensorer (typ LifeEvent-integrationen): återkommande årliga händelser (födelsedagar, namnsdagar, jubileum) med attribut som antal dagar kvar, nästa datum, ålder/antal år
+- [ ] Nedräkningssensor (`sensor` med t.ex. state = antal dagar/timmar kvar) som går att koppla till antingen:
+  - ett kalenderevent (nästa matchande event ur en filtrerad källa, likt aktivitetssensorerna), eller
+  - ett fristående event man matar in direkt i sensorns konfiguration (datum/tid + namn), utan någon kalenderkälla alls
 - [ ] Möjlighet att koppla en automation-mall direkt från panelen (förslag på trigger-YAML)
 
 ## Utseende
@@ -66,3 +70,10 @@
 - Recurring events hanteras som redan expanderade instanser inom tidsfönstret – redigering av en hel serie sker i källkalendern, inte i merge-kalendern
 - Den egna, automatiskt skapade kalendern stödjer inte återkommande event (RRULE) – varje event lagras som ett enskilt tillfälle
 - `calendar.get_events`/entitetsmetoderna för update/delete kräver en tillräckligt ny Home Assistant-version (2023.8+ ungefär) som stödjer `return_response` och entity-baserad update/delete
+
+
+
+#Egan
+
+
+
