@@ -5,9 +5,15 @@ redan syns som `calendar.*` i HA) till EN kalender som:
 
 - syns som en vanlig kalender i Home Assistants kalendervy
 - går att prenumerera på från valfri kalenderapp (Google Kalender, Apple
-  Kalender, Outlook m.fl.) via en hemlig ICS-länk ("Lägg till kalender via URL")
+  Kalender, Outlook m.fl.) via en hemlig ICS-länk ("Lägg till kalender via URL") –
+  read-only
+- går att redigera direkt i kalenderappen via ett riktigt CalDAV-konto (Apple
+  Kalender, Thunderbird, DAVx5 på Android – se avsnitt 6; Google Kalender saknar
+  stöd för externa CalDAV-konton och förblir read-only oavsett)
 - automatiskt skapar sin egen skrivbara kalender som nya event hamnar i som
   standard – du behöver inte skapa eller peka ut någon kalender själv
+- stödjer återkommande event (upprepning), inklusive att redigera/ta bort ett
+  enstaka tillfälle i en serie
 - låter dig sätta egen ikon och bild, både för kalendrar och för
   aktivitetssensorer
 
@@ -111,7 +117,42 @@ Du kan redigera och ta bort event direkt från den sammanslagna kalendern
 automatiskt vidare dit, medan event du skapat direkt på den sammanslagna
 kalendern uppdateras/tas bort på plats.
 
-## 6. Filtrera event per källa
+## 6. Redigera direkt i kalenderappen (CalDAV)
+
+Prenumerationslänken i avsnitt 2 (webcal/ICS) är alltid **read-only** – det
+är en fil kalenderappen bara läser med jämna mellanrum, det finns ingen väg
+tillbaka för ändringar. För att kunna skapa, redigera och ta bort event
+**direkt i kalenderappen** och få det synkat till Cal Combiner behövs ett
+riktigt CalDAV-konto istället, vilket panelen också ger dig (samma kort som
+prenumerationslänken, under "Redigera direkt i kalenderappen").
+
+**Vilka appar stödjer detta?**
+
+| App | Skapa/redigera/ta bort direkt i appen? |
+|---|---|
+| Home Assistants egen kalendervy | Ja – fungerar redan idag, inget extra behövs |
+| Apple Kalender (macOS/iOS) | Ja – lägg till som **Övrigt → Lägg till CalDAV-konto** |
+| Thunderbird | Ja – **Ny kalender → På nätverket → CalDAV** |
+| Android + [DAVx5](https://www.davx5.com/) | Ja |
+| Google Kalender (webb, iOS, Android) | **Nej** – Google har ingen funktion för att lägga till ett externt CalDAV-konto i någon av sina appar. Det är en begränsning i Google Kalender, inte något som går att lösa härifrån. Använd prenumerationslänken (read-only) eller redigera via HA:s egen kalendervy istället |
+| Outlook | Nej som standard (kräver tredjeparts-tillägg) |
+
+**Kontouppgifter** (från panelen, per sammanslagen kalender):
+- **Server-URL**
+- **Användarnamn**: valfritt värde, kontrolleras inte
+- **Lösenord**: samma hemliga token som prenumerationslänken använder
+
+Precis som prenumerationslänken kräver detta att en "Home Assistant-URL" är
+konfigurerad (Inställningar → System → Nätverk), och att den är nåbar från
+enheten du lägger till kontot på (HTTPS rekommenderas starkt om du gör detta
+över internet, eftersom lösenordet annars skickas i klartext).
+
+Skapar du ett återkommande event (upprepning) i kalenderappen sparas det med
+sin upprepningsregel – att redigera eller ta bort bara ett enstaka
+tillfälle i en serie stöds också, både från appen och från HA:s egen
+kalendervy.
+
+## 7. Filtrera event per källa
 
 Inställningar → Enheter & tjänster → Cal Combiner → **Konfigurera** →
 **Redigera filter per källa**. Välj vilken källkalender du vill filtrera,
@@ -132,7 +173,7 @@ Du kan sätta både include och exclude samtidigt. Lämna båda tomma för att t
 bort filtret för den källan igen. Filtret gäller bara den valda
 källkalendern – andra källor i samma sammanslagna kalender är opåverkade.
 
-## 7. Flera sammanslagna kalendrar
+## 8. Flera sammanslagna kalendrar
 
 Integrationen har inget "endast en instans"-krav – lägg till **Cal Combiner**
 flera gånger (Inställningar → Enheter & tjänster → Lägg till integration →
@@ -140,13 +181,13 @@ Cal Combiner) för att bygga t.ex. en "Familj"-kalender och en separat
 "Jobb"-kalender, var och en med sin egen skrivbara kalender, egna källor,
 filter, ikon/bild och ICS-länk.
 
-## 8. Om en källa inte svarar
+## 9. Om en källa inte svarar
 
 Om en källkalender inte går att nå (t.ex. utgången Google-token) exkluderas
 den tillfälligt och du får en notis i HA om vilken källa det gäller. Notisen
 försvinner automatiskt igen så fort källan svarar normalt.
 
-## 9. Bygga vidare
+## 10. Bygga vidare
 
 Se `IDEAS.md` för en avbockningsbar lista över vad som är gjort och vad som
 återstår.
@@ -156,16 +197,18 @@ Se `IDEAS.md` för en avbockningsbar lista över vad som är gjort och vad som
 ```
 custom_components/
   cal_combiner/
-    __init__.py       # setup, ICS-länk-notis, registrerar panel + ws-api
-    calendar.py         # sammanslagen kalender-entitet + delad filterlogik
-    own_calendar.py        # lagring för de event varje sammanslagen kalender äger direkt
+    __init__.py       # setup, ICS-länk-notis, registrerar panel + ws-api + CalDAV
+    calendar.py         # sammanslagen kalender-entitet + delad filter-/routningslogik
+    own_calendar.py        # lagring (inkl. upprepning) för event varje sammanslagen kalender äger direkt
+    caldav.py                # minimal CalDAV-server (PROPFIND/REPORT/GET/PUT/DELETE) för tvåvägssync
     activity.py               # delad coordinator + tidshjälpfunktioner för aktivitetssensorer
-    binary_sensor.py             # aktivitetssensor: på/av (nu eller idag)
-    sensor.py                      # aktivitetssensor: aktuellt/nästa event
-    config_flow.py                   # UI för att lägga till/ändra (meny: kalender/sensor)
-    http.py                            # /api/cal_combiner/... ICS-feed
-    panel.py                             # registrerar sidopanelen + statiska filer
-    ws_api.py                              # websocket-kommandon som panelen använder
+    activity_log.py             # liten rullande händelselogg per kalender/sensor, visas i panelen
+    binary_sensor.py               # aktivitetssensor: på/av (nu eller idag)
+    sensor.py                        # aktivitetssensor: aktuellt/nästa event
+    config_flow.py                     # UI för att lägga till/ändra (meny: kalender/sensor)
+    http.py                              # /api/cal_combiner/... ICS-feed
+    panel.py                               # registrerar sidopanelen + statiska filer
+    ws_api.py                                # websocket-kommandon som panelen använder
     const.py
     manifest.json
     hacs.json

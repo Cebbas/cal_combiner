@@ -112,10 +112,16 @@ class CalCombinerPanel extends HTMLElement {
         .cc-filter-fields label { font-size: 13px; color: var(--secondary-text-color); display: flex; align-items: center; gap: 6px; }
         .cc-feed-row { display: flex; gap: 6px; margin-top: 4px; }
         .cc-feed-row input { font-size: 12px; }
+        .cc-caldav-field-label { font-size: 12px; color: var(--secondary-text-color); min-width: 130px; flex-shrink: 0; }
         .cc-source-block { border: 1px solid var(--divider-color, #eee); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
         .cc-error { color: var(--error-color, #db4437); font-size: 13px; margin: 4px 0; }
         .cc-warning { color: var(--warning-color, #ff9800); font-size: 12px; margin: 4px 0; }
         .cc-new-card { border: 2px dashed var(--divider-color, #ccc); }
+        .cc-log-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+        .cc-log-row { display: flex; gap: 10px; font-size: 13px; padding: 4px 0;
+          border-bottom: 1px solid var(--divider-color, #eee); }
+        .cc-log-row:last-child { border-bottom: none; }
+        .cc-log-time { color: var(--secondary-text-color); flex-shrink: 0; white-space: nowrap; }
       </style>
       <h1><ha-icon icon="mdi:calendar-sync"></ha-icon>Cal Combiner</h1>
       <p class="subtitle">Bygg och hantera dina sammanslagna kalendrar och aktivitetssensorer.</p>
@@ -580,6 +586,107 @@ class CalCombinerPanel extends HTMLElement {
     return box;
   }
 
+  _buildCalDavBox(entry) {
+    const box = document.createElement("div");
+    if (!entry.caldav_url) {
+      const warn = document.createElement("div");
+      warn.className = "cc-warning";
+      warn.textContent =
+        'Ingen "Home Assistant-URL" är konfigurerad (Inställningar → System → Nätverk), så CalDAV-kontot kan inte visas fullständigt än.';
+      box.appendChild(warn);
+      return box;
+    }
+
+    const label = document.createElement("div");
+    label.style.fontSize = "12px";
+    label.style.color = "var(--secondary-text-color)";
+    label.textContent =
+      'För att redigera, ta bort och lägga till event direkt i kalenderappen (Apple Kalender, Thunderbird, DAVx5 på Android) – lägg till ett CalDAV-konto med uppgifterna nedan. Google Kalender saknar stöd för externa CalDAV-konton och kan bara prenumerera read-only (ovan).';
+    box.appendChild(label);
+
+    [
+      { value: entry.caldav_url, title: "Server-URL" },
+      { value: "cal_combiner", title: "Användarnamn (valfritt värde)" },
+      { value: entry.caldav_password, title: "Lösenord" },
+    ].forEach(({ value, title }) => {
+      const row = document.createElement("div");
+      row.className = "cc-feed-row";
+      const fieldLabel = document.createElement("span");
+      fieldLabel.className = "cc-caldav-field-label";
+      fieldLabel.textContent = title;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.readOnly = true;
+      input.value = value;
+      input.onclick = () => input.select();
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "secondary";
+      copyBtn.textContent = "Kopiera";
+      copyBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          copyBtn.textContent = "Kopierad!";
+        } catch (err) {
+          input.select();
+          copyBtn.textContent = "Markerad";
+        }
+        setTimeout(() => (copyBtn.textContent = "Kopiera"), 1500);
+      };
+      row.appendChild(fieldLabel);
+      row.appendChild(input);
+      row.appendChild(copyBtn);
+      box.appendChild(row);
+    });
+
+    return box;
+  }
+
+  _buildActivityLogBox(entryId) {
+    const box = document.createElement("div");
+
+    const title = document.createElement("div");
+    title.className = "cc-section-title";
+    title.textContent = "Senaste händelser";
+    box.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "cc-log-list";
+    list.textContent = "Laddar…";
+    box.appendChild(list);
+
+    this._hass
+      .callWS({ type: "cal_combiner/get_activity_log", entry_id: entryId })
+      .then((resp) => {
+        list.innerHTML = "";
+        if (!resp.entries.length) {
+          const empty = document.createElement("div");
+          empty.className = "cc-chip-empty";
+          empty.textContent = "Inga händelser ännu";
+          list.appendChild(empty);
+          return;
+        }
+        resp.entries.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "cc-log-row";
+          const time = document.createElement("span");
+          time.className = "cc-log-time";
+          time.textContent = new Date(item.time).toLocaleString();
+          const msg = document.createElement("span");
+          msg.textContent = item.message;
+          row.appendChild(time);
+          row.appendChild(msg);
+          list.appendChild(row);
+        });
+      })
+      .catch((err) => {
+        list.textContent = "Kunde inte hämta händelser";
+        console.warn("Cal Combiner: kunde inte hämta aktivitetslogg", err);
+      });
+
+    return box;
+  }
+
   _renderFilterBlock(entry, sourceEntityId) {
     const key = `${entry.entry_id}::${sourceEntityId}`;
     const box = document.createElement("div");
@@ -746,9 +853,17 @@ class CalCombinerPanel extends HTMLElement {
 
     const feedLabel = document.createElement("div");
     feedLabel.className = "cc-section-title";
-    feedLabel.textContent = "Dela kalendern";
+    feedLabel.textContent = "Dela kalendern (prenumerera, read-only)";
     card.appendChild(feedLabel);
     card.appendChild(this._buildFeedBox(entry));
+
+    const caldavLabel = document.createElement("div");
+    caldavLabel.className = "cc-section-title";
+    caldavLabel.textContent = "Redigera direkt i kalenderappen (CalDAV)";
+    card.appendChild(caldavLabel);
+    card.appendChild(this._buildCalDavBox(entry));
+
+    card.appendChild(this._buildActivityLogBox(entry.entry_id));
 
     return card;
   }
@@ -969,6 +1084,8 @@ class CalCombinerPanel extends HTMLElement {
     actions.appendChild(saveBtn);
     actions.appendChild(deleteBtn);
     card.appendChild(actions);
+
+    card.appendChild(this._buildActivityLogBox(sensorEntry.entry_id));
 
     return card;
   }

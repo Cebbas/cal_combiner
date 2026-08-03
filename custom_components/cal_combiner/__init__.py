@@ -17,6 +17,7 @@ from .const import (
     PLATFORMS_ACTIVITY,
     PLATFORMS_MERGE,
 )
+from .caldav import async_register_caldav
 from .http import async_setup_feed_view
 from .panel import async_register_panel
 from .ws_api import async_register_ws_api
@@ -38,6 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if entry_type == ENTRY_TYPE_MERGE:
         await async_setup_feed_view(hass)
+        async_register_caldav(hass)
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_MERGE)
         _notify_feed_url(hass, entry)
     else:

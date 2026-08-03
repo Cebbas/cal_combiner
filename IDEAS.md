@@ -20,6 +20,17 @@
 - [x] Redigera event via den sammanslagna kalendern (skickas vidare till rätt källa)
 - [x] Ta bort event via den sammanslagna kalendern (skickas vidare till rätt källa)
 - [x] `create_event` anropar källkalenderns entitet direkt istället för att gå via `calendar.create_event`-tjänsten (undviker schemamismatch mellan entitets- och tjänste-nycklar)
+- [x] Återkommande event (RRULE) på den egna kalendern: skapa, visa expanderat i rätt datumintervall, redigera/ta bort hela serien eller bara ett enstaka tillfälle (`recurrence_id`, lagras som `exdates`/`overrides` på master-eventet)
+
+## Tvåvägssync (CalDAV)
+- [x] Minimal CalDAV-server (`caldav.py`): OPTIONS, PROPFIND (fast egenskapsuppsättning), REPORT `calendar-query`, GET/PUT/DELETE per event – registrerat direkt på `hass.http.app.router` eftersom `HomeAssistantView` inte stödjer PROPFIND/REPORT
+- [x] Basic Auth (valfritt användarnamn, lösenord = samma hemliga token som ICS-länken) – egen kontroll i varje handler, går inte via HA:s inbyggda auth-middleware
+- [x] Exponerar både egna event OCH sammanslagna externa källor (redigering av externa vidarebefordras till rätt källa, precis som HA:s egen kalendervy redan gör)
+- [x] En CalDAV-resurs per event-uid; ett återkommande event serialiseras som master-VEVENT (med RRULE) + en VEVENT per enstaka-tillfälle-ändring (RECURRENCE-ID) i samma resurs – så representeras upprepning faktiskt i iCalendar-formatet, inte en resurs per tillfälle
+- [x] Kontouppgifter (server-URL/användarnamn/lösenord) synliga och kopierbara i panelen
+- [x] Verifierat med ett fristående interop-test (det oberoende Python-biblioteket `caldav`, inte vår egen kod) mot en riktig aiohttp-server i minnet: discovery, skapa/lista/ändra/ta bort engångsevent, återkommande event med RRULE, redigera ett enstaka tillfälle via RECURRENCE-ID, samt att fel/utebliven inloggning faktiskt avvisas (401)
+- [ ] `sync-collection` REPORT (inkrementell synk via versionsräknare + tombstones) – `calendar-query` täcker redan all funktionalitet, detta är bara en effektivitetsvinst klienter redan hanterar frånvaron av
+- [ ] Google Kalender kan aldrig få detta – ingen "lägg till externt CalDAV-konto"-funktion finns i Google Kalender (webb/iOS/Android). Apple Kalender, Thunderbird och Android+DAVx5 stödjer det.
 
 ## Robusthet
 - [x] Options-flow uppdaterat för att undvika kommande HA-deprecation (self.config_entry)
@@ -27,6 +38,8 @@
 - [x] ICS-prenumerationslänken byggs med `homeassistant.helpers.network.get_url` (extern → intern → IP-fallback) istället för att bara läsa `external_url`/`internal_url`, så länken faktiskt fungerar när inget av dem är satt fullständigt
 - [ ] Repair-issue (istället för bara persistent_notification) så felet syns i Inställningar → Repairs
 - [ ] Retry/backoff om en källa svarar ostabilt istället för att direkt räknas som "failed" för hela pollningsintervallet
+- [ ] Reauth-flow (`async_step_reauth`) så en källa med utgången token (t.ex. Google) kan återautentiseras direkt istället för att integrationen behöver tas bort och läggas till igen
+- [ ] Diagnostics-stöd (`diagnostics.py`) för att exportera felsökningsdata via HA:s inbyggda diagnostics-gränssnitt
 
 ## Aktivitetssensorer
 - [x] Bygg fristående sensorer (`binary_sensor`/`sensor`) från filtrerade kalenderaktiviteter
@@ -55,7 +68,11 @@
 - [x] Ikon- och bildväljare för både kalendrar och sensorer
 - [x] Kortrenderingen är felskyddad (try/catch per kort) så ett trasigt kort visar ett läsbart felmeddelande istället för att lämna hela fliken tom
 - [ ] Drag-och-släpp / färgkodning per källa i panelen (mer avancerad frontend, likt vacuum scheduler)
-- [ ] Visa `failed_sources`-status i panelen (just nu bara synligt som entity-attribut/notis)
+- [x] Visa `failed_sources`-status i panelen – täcks nu av aktivitetsloggen nedan (källa svarar inte/svarar igen loggas per kort)
+- [x] Aktivitetslogg per kalender/sensor ("Senaste händelser"-lista längst ner på varje kort): källa/filter tillagd/ändrad/borttagen, event skapat/uppdaterat/borttaget, källa svarar inte/svarar igen. Egen liten `Store` per entry (`activity_log.py`), rullande fönster på de 50 senaste händelserna, städas när entryn tas bort.
+
+## Tester
+- [ ] Automatiserade tester (unit-tester för filterlogik, ICS-generering, create/update/delete-vidarebefordran) – idag kör CI bara hassfest/HACS-validering, ingen faktisk testsvit
 
 ## Trevligt-att-ha (ej påbörjat)
 - [ ] Device-gruppering för entiteterna i UI:t
@@ -65,11 +82,13 @@
 
 ## Buggar (fixade)
 - [x] Panelen renderades i light DOM utan `attachShadow`, så `<style>:host{...}</style>` matchade ingenting (våra egna storleksregler gällde aldrig) samtidigt som våra vanliga tagg-/klassväljare (`button`, `select`, `input[type="text"]`, `h1`, `*`) läckte ut och gällde globalt i HELA Home Assistant-appen, inte bara panelen. Fixat genom att faktiskt använda `this.attachShadow({mode:"open"})` och rendera allt inuti shadow-roten.
+- [x] `_parse(value)` i `own_calendar.py` (och motsvarande i `calendar.py`s källhämtning) provade `parse_datetime` före `parse_date`. `parse_datetime` "lyckas" även för en ren datumsträng (som en naiv midnatts-datetime), vilket bröt heldagsevent – de kraschade i `CalendarEvent`s validering ("Expected all values to have a timezone"). Hittades via ett test som faktiskt skapade ett heldags-återkommande event end-to-end. Fixat genom att pröva `parse_date` först.
+- [x] Trailing-slash-mismatch i CalDAV: kontots URL delades ut med avslutande `/` men routen registrerades utan, så `PROPFIND` gav 404 direkt. Hittades via ett interop-test mot en riktig server (inte bara enhetstester av vår egen kod). Fixat genom att registrera båda varianterna.
 
 ## Kända begränsningar
-- Recurring events hanteras som redan expanderade instanser inom tidsfönstret – redigering av en hel serie sker i källkalendern, inte i merge-kalendern
-- Den egna, automatiskt skapade kalendern stödjer inte återkommande event (RRULE) – varje event lagras som ett enskilt tillfälle
+- Recurring events från EXTERNA källkalendrar hanteras som redan expanderade instanser inom tidsfönstret (så kommer `calendar.get_events` från HA:s egna kalenderintegrationer) – redigering av en hel serie sker i källkalendern, inte i merge-kalendern. Den egna kalendern (och CalDAV-servern) stödjer däremot fullt ut återkommande event, se "Redigering" och "Tvåvägssync" ovan.
 - `calendar.get_events`/entitetsmetoderna för update/delete kräver en tillräckligt ny Home Assistant-version (2023.8+ ungefär) som stödjer `return_response` och entity-baserad update/delete
+- CalDAV-servern implementerar den praktiska delmängden av RFC 4791 som Apple Kalender/Thunderbird/DAVx5 faktiskt använder (fast egenskapsuppsättning i PROPFIND istället för full dynamisk förhandling, ingen `sync-collection` än) – inte hela specifikationen
 
 
 

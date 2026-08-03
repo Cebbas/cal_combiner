@@ -7,6 +7,8 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
+from .activity_log import async_clear, async_get_entries, async_log
+from .caldav import caldav_url
 from .const import (
     CONF_CREATE_BINARY,
     CONF_CREATE_SENSOR,
@@ -48,6 +50,8 @@ def _entry_to_dict(hass: HomeAssistant, entry) -> dict:
         "feed_url_webcal": feed_url.replace("https://", "webcal://").replace("http://", "webcal://")
         if feed_url
         else None,
+        "caldav_url": caldav_url(hass, entry.entry_id),
+        "caldav_password": entry.data.get(CONF_TOKEN),
     }
 
 
@@ -100,7 +104,9 @@ async def ws_create_entry(hass: HomeAssistant, connection, msg):
     if result.get("type") == "form":
         connection.send_error(msg["id"], "invalid_input", "Kunde inte skapa kalendern")
         return
-    connection.send_result(msg["id"], {"ok": True, "entry_id": result["result"].entry_id})
+    entry_id = result["result"].entry_id
+    await async_log(hass, entry_id, "Kalender skapad")
+    connection.send_result(msg["id"], {"ok": True, "entry_id": entry_id})
 
 
 @websocket_api.require_admin
@@ -121,6 +127,22 @@ async def ws_update_entry(hass: HomeAssistant, connection, msg):
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
 
+    changes = []
+    if msg["name"] != entry.data.get(CONF_NAME):
+        changes.append(f'namn ändrat till "{msg["name"]}"')
+    old_sources = set(entry.data.get(CONF_SOURCES, []))
+    new_sources = set(msg["sources"])
+    added = new_sources - old_sources
+    removed = old_sources - new_sources
+    if added:
+        changes.append(f"källa tillagd: {', '.join(sorted(added))}")
+    if removed:
+        changes.append(f"källa borttagen: {', '.join(sorted(removed))}")
+    if msg.get("icon") != entry.data.get(CONF_ICON):
+        changes.append("ikon ändrad")
+    if msg.get("picture") != entry.data.get(CONF_PICTURE):
+        changes.append("bild ändrad")
+
     new_data = dict(entry.data)
     new_data[CONF_NAME] = msg["name"]
     new_data[CONF_SOURCES] = msg["sources"]
@@ -128,6 +150,8 @@ async def ws_update_entry(hass: HomeAssistant, connection, msg):
     new_data[CONF_PICTURE] = msg.get("picture")
     hass.config_entries.async_update_entry(entry, data=new_data, title=msg["name"])
     await hass.config_entries.async_reload(entry.entry_id)
+    if changes:
+        await async_log(hass, entry.entry_id, "Uppdaterad: " + "; ".join(changes))
     connection.send_result(msg["id"], {"ok": True})
 
 
@@ -158,6 +182,8 @@ async def ws_update_filter(hass: HomeAssistant, connection, msg):
     new_data[CONF_FILTERS] = filters
     hass.config_entries.async_update_entry(entry, data=new_data)
     await hass.config_entries.async_reload(entry.entry_id)
+    verb = "satt" if new_filter else "borttaget"
+    await async_log(hass, entry.entry_id, f"Filter {verb} för {msg['source_entity_id']}")
     connection.send_result(msg["id"], {"ok": True})
 
 
@@ -223,7 +249,9 @@ async def ws_create_activity_sensor(hass: HomeAssistant, connection, msg):
     if result.get("type") == "form":
         connection.send_error(msg["id"], "invalid_input", "Kunde inte skapa sensorn")
         return
-    connection.send_result(msg["id"], {"ok": True, "entry_id": result["result"].entry_id})
+    entry_id = result["result"].entry_id
+    await async_log(hass, entry_id, "Sensor skapad")
+    connection.send_result(msg["id"], {"ok": True, "entry_id": entry_id})
 
 
 @websocket_api.require_admin
@@ -272,6 +300,20 @@ async def ws_update_activity_sensor(hass: HomeAssistant, connection, msg):
         else None
     )
 
+    changes = []
+    if msg["name"] != entry.data.get(CONF_NAME):
+        changes.append(f'namn ändrat till "{msg["name"]}"')
+    if set(msg["sources"]) != set(entry.data.get(CONF_SOURCES, [])):
+        changes.append("källor uppdaterade")
+    if rule != entry.data.get(CONF_FILTER):
+        changes.append("filter uppdaterat")
+    if msg["trigger_mode"] != entry.data.get(CONF_TRIGGER_MODE, TRIGGER_MODE_ACTIVE):
+        changes.append("triggerläge ändrat")
+    if msg.get("icon") != entry.data.get(CONF_ICON):
+        changes.append("ikon ändrad")
+    if msg.get("picture") != entry.data.get(CONF_PICTURE):
+        changes.append("bild ändrad")
+
     new_data = dict(entry.data)
     new_data[CONF_NAME] = msg["name"]
     new_data[CONF_SOURCES] = msg["sources"]
@@ -283,6 +325,8 @@ async def ws_update_activity_sensor(hass: HomeAssistant, connection, msg):
     new_data[CONF_CREATE_SENSOR] = msg["create_sensor"]
     hass.config_entries.async_update_entry(entry, data=new_data, title=msg["name"])
     await hass.config_entries.async_reload(entry.entry_id)
+    if changes:
+        await async_log(hass, entry.entry_id, "Uppdaterad: " + "; ".join(changes))
     connection.send_result(msg["id"], {"ok": True})
 
 
@@ -298,7 +342,18 @@ async def ws_delete_entry(hass: HomeAssistant, connection, msg):
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
     await hass.config_entries.async_remove(msg["entry_id"])
+    await async_clear(hass, msg["entry_id"])
     connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/get_activity_log", vol.Required("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_get_activity_log(hass: HomeAssistant, connection, msg):
+    entries = await async_get_entries(hass, msg["entry_id"])
+    connection.send_result(msg["id"], {"entries": entries})
 
 
 def async_register_ws_api(hass: HomeAssistant) -> None:
@@ -311,3 +366,4 @@ def async_register_ws_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list_activity_sensors)
     websocket_api.async_register_command(hass, ws_create_activity_sensor)
     websocket_api.async_register_command(hass, ws_update_activity_sensor)
+    websocket_api.async_register_command(hass, ws_get_activity_log)

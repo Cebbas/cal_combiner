@@ -7,6 +7,6 @@
   "documentation": "https://github.com/Cebbas/cal_combiner",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Cebbas/cal_combiner/issues",
-  "requirements": ["icalendar>=5.0.11"],
-  "version": "0.0.5"
+  "requirements": ["icalendar>=5.0.11", "python-dateutil>=2.8.2"],
+  "version": "0.0.6"
 }

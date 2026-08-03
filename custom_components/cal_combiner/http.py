@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import hmac
 import logging
 
 from aiohttp import web
@@ -42,7 +43,7 @@ class CalendarMergeFeedView(HomeAssistantView):
             return web.Response(status=404)
 
         entry = entry_data["entry"]
-        if token != entry.data.get(CONF_TOKEN):
+        if not hmac.compare_digest(token, entry.data.get(CONF_TOKEN, "")):
             return web.Response(status=403)
 
         now = dt_util.now()
