@@ -10,11 +10,9 @@ class CalCombinerPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._entries = [];
     this._calendars = [];
-    this._activitySensors = [];
     this._initialized = false;
     this._activeTab = "calendars";
     this._activeCalendarKey = "__new__"; // entry_id, or "__new__" for the create-new sub-tab
-    this._activeSensorKey = "__new__";
     this._openFilters = {}; // "entryId::entityId" -> bool
   }
 
@@ -110,7 +108,7 @@ class CalCombinerPanel extends HTMLElement {
           background: var(--secondary-background-color, #f4f4f4); border-radius: 8px; }
         .cc-filter-fields.open { display: flex; }
         .cc-filter-fields label { font-size: 13px; color: var(--secondary-text-color); display: flex; align-items: center; gap: 6px; }
-        .cc-feed-row { display: flex; gap: 6px; margin-top: 4px; }
+        .cc-feed-row { display: flex; gap: 6px; margin-top: 4px; align-items: center; }
         .cc-feed-row input { font-size: 12px; }
         .cc-caldav-field-label { font-size: 12px; color: var(--secondary-text-color); min-width: 130px; flex-shrink: 0; }
         .cc-source-block { border: 1px solid var(--divider-color, #eee); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
@@ -122,12 +120,13 @@ class CalCombinerPanel extends HTMLElement {
           border-bottom: 1px solid var(--divider-color, #eee); }
         .cc-log-row:last-child { border-bottom: none; }
         .cc-log-time { color: var(--secondary-text-color); flex-shrink: 0; white-space: nowrap; }
+        .cc-check-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }
       </style>
       <h1><ha-icon icon="mdi:calendar-sync"></ha-icon>Cal Combiner</h1>
-      <p class="subtitle">Bygg och hantera dina sammanslagna kalendrar och aktivitetssensorer.</p>
+      <p class="subtitle">Bygg och hantera dina sammanslagna kalendrar.</p>
       <div class="cc-tabs">
         <button class="cc-tab" data-tab="calendars"><ha-icon icon="mdi:calendar-multiple"></ha-icon>Kalendrar</button>
-        <button class="cc-tab" data-tab="sensors"><ha-icon icon="mdi:motion-sensor"></ha-icon>Sensorer</button>
+        <button class="cc-tab" data-tab="server"><ha-icon icon="mdi:server"></ha-icon>Server</button>
       </div>
       <div id="root">Laddar…</div>
     `;
@@ -141,14 +140,12 @@ class CalCombinerPanel extends HTMLElement {
   }
 
   async _reload() {
-    const [entriesResp, calendarsResp, activityResp] = await Promise.all([
+    const [entriesResp, calendarsResp] = await Promise.all([
       this._hass.callWS({ type: "cal_combiner/list_entries" }),
       this._hass.callWS({ type: "cal_combiner/list_calendars" }),
-      this._hass.callWS({ type: "cal_combiner/list_activity_sensors" }),
     ]);
     this._entries = entriesResp.entries;
     this._calendars = calendarsResp.calendars;
-    this._activitySensors = activityResp.entries;
     this._render();
   }
 
@@ -185,30 +182,7 @@ class CalCombinerPanel extends HTMLElement {
         this._safeAppend(root, () => this._renderEntryCard(entry), `kalendern "${entry.name}"`);
       }
     } else {
-      const sub = document.createElement("p");
-      sub.className = "subtitle";
-      sub.textContent =
-        "Skapar en binary_sensor (på/av) och/eller sensor (visar aktuellt/nästa event) för ett filtrerat urval av kalenderaktiviteter.";
-      root.appendChild(sub);
-
-      if (
-        this._activeSensorKey !== "__new__" &&
-        !this._activitySensors.find((e) => e.entry_id === this._activeSensorKey)
-      ) {
-        this._activeSensorKey = this._activitySensors.length ? this._activitySensors[0].entry_id : "__new__";
-      }
-      root.appendChild(
-        this._renderSubTabs(this._activitySensors, this._activeSensorKey, (key) => {
-          this._activeSensorKey = key;
-          this._render();
-        })
-      );
-      if (this._activeSensorKey === "__new__") {
-        this._safeAppend(root, () => this._renderNewActivitySensorCard(), "ny sensor");
-      } else {
-        const sensorEntry = this._activitySensors.find((e) => e.entry_id === this._activeSensorKey);
-        this._safeAppend(root, () => this._renderActivitySensorCard(sensorEntry), `sensorn "${sensorEntry.name}"`);
-      }
+      this._safeAppend(root, () => this._renderServerTab(), "CalDAV-servern");
     }
   }
 
@@ -586,62 +560,6 @@ class CalCombinerPanel extends HTMLElement {
     return box;
   }
 
-  _buildCalDavBox(entry) {
-    const box = document.createElement("div");
-    if (!entry.caldav_url) {
-      const warn = document.createElement("div");
-      warn.className = "cc-warning";
-      warn.textContent =
-        'Ingen "Home Assistant-URL" är konfigurerad (Inställningar → System → Nätverk), så CalDAV-kontot kan inte visas fullständigt än.';
-      box.appendChild(warn);
-      return box;
-    }
-
-    const label = document.createElement("div");
-    label.style.fontSize = "12px";
-    label.style.color = "var(--secondary-text-color)";
-    label.textContent =
-      'För att redigera, ta bort och lägga till event direkt i kalenderappen (Apple Kalender, Thunderbird, DAVx5 på Android) – lägg till ett CalDAV-konto med uppgifterna nedan. Google Kalender saknar stöd för externa CalDAV-konton och kan bara prenumerera read-only (ovan).';
-    box.appendChild(label);
-
-    [
-      { value: entry.caldav_url, title: "Server-URL" },
-      { value: "cal_combiner", title: "Användarnamn (valfritt värde)" },
-      { value: entry.caldav_password, title: "Lösenord" },
-    ].forEach(({ value, title }) => {
-      const row = document.createElement("div");
-      row.className = "cc-feed-row";
-      const fieldLabel = document.createElement("span");
-      fieldLabel.className = "cc-caldav-field-label";
-      fieldLabel.textContent = title;
-      const input = document.createElement("input");
-      input.type = "text";
-      input.readOnly = true;
-      input.value = value;
-      input.onclick = () => input.select();
-      const copyBtn = document.createElement("button");
-      copyBtn.type = "button";
-      copyBtn.className = "secondary";
-      copyBtn.textContent = "Kopiera";
-      copyBtn.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(value);
-          copyBtn.textContent = "Kopierad!";
-        } catch (err) {
-          input.select();
-          copyBtn.textContent = "Markerad";
-        }
-        setTimeout(() => (copyBtn.textContent = "Kopiera"), 1500);
-      };
-      row.appendChild(fieldLabel);
-      row.appendChild(input);
-      row.appendChild(copyBtn);
-      box.appendChild(row);
-    });
-
-    return box;
-  }
-
   _buildActivityLogBox(entryId) {
     const box = document.createElement("div");
 
@@ -857,11 +775,11 @@ class CalCombinerPanel extends HTMLElement {
     card.appendChild(feedLabel);
     card.appendChild(this._buildFeedBox(entry));
 
-    const caldavLabel = document.createElement("div");
-    caldavLabel.className = "cc-section-title";
-    caldavLabel.textContent = "Redigera direkt i kalenderappen (CalDAV)";
-    card.appendChild(caldavLabel);
-    card.appendChild(this._buildCalDavBox(entry));
+    const caldavHint = document.createElement("div");
+    caldavHint.className = "cc-warning";
+    caldavHint.textContent =
+      'Vill du redigera event direkt i kalenderappen istället? Kryssa i den här kalendern under fliken "Server".';
+    card.appendChild(caldavHint);
 
     card.appendChild(this._buildActivityLogBox(entry.entry_id));
 
@@ -937,283 +855,139 @@ class CalCombinerPanel extends HTMLElement {
     return card;
   }
 
-  // ---- sensors tab ----
+  // ---- server tab (shared CalDAV account) ----
 
-  _buildTriggerModeSelect(value) {
-    const select = document.createElement("select");
-    [
-      { value: "active_now", label: "Ett event pågår just nu" },
-      { value: "today", label: "Ett event inträffar någon gång idag" },
-    ].forEach(({ value: v, label }) => {
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = label;
-      if ((value || "active_now") === v) opt.selected = true;
-      select.appendChild(opt);
-    });
-    return select;
-  }
+  _renderServerTab() {
+    const wrap = document.createElement("div");
 
-  _renderActivitySensorCard(sensorEntry) {
     const card = document.createElement("div");
     card.className = "cc-card";
 
-    const header = document.createElement("div");
-    header.className = "cc-card-header";
-    const icon = document.createElement("ha-icon");
-    icon.setAttribute("icon", sensorEntry.icon || "mdi:calendar-check");
-    header.appendChild(icon);
-    if (sensorEntry.picture) {
-      const avatar = document.createElement("img");
-      avatar.className = "cc-avatar";
-      avatar.src = sensorEntry.picture;
-      header.appendChild(avatar);
-    }
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.className = "cc-name";
-    nameInput.value = sensorEntry.name;
-    header.appendChild(nameInput);
-    card.appendChild(header);
-
-    const iconLabel = document.createElement("div");
-    iconLabel.className = "cc-section-title";
-    iconLabel.textContent = "Ikon";
-    card.appendChild(iconLabel);
-    const iconPicker = this._buildIconPicker(sensorEntry.icon);
-    card.appendChild(iconPicker.element);
-
-    const pictureLabel = document.createElement("div");
-    pictureLabel.className = "cc-section-title";
-    pictureLabel.textContent = "Bild";
-    card.appendChild(pictureLabel);
-    const picturePicker = this._buildPicturePicker(sensorEntry.picture);
-    card.appendChild(picturePicker.element);
-
-    const sourcesLabel = document.createElement("div");
-    sourcesLabel.className = "cc-section-title";
-    sourcesLabel.textContent = "Källkalendrar";
-    card.appendChild(sourcesLabel);
-    const sourcePicker = this._buildSourcePicker(sensorEntry.sources);
-    card.appendChild(sourcePicker.element);
-
-    const filterLabel = document.createElement("div");
-    filterLabel.className = "cc-section-title";
-    filterLabel.textContent = "Filter";
-    card.appendChild(filterLabel);
-    const filterControls = this._buildFilterFieldsControls(sensorEntry.filter);
-    card.appendChild(filterControls.element);
-
-    const triggerLabel = document.createElement("div");
-    triggerLabel.className = "cc-section-title";
-    triggerLabel.textContent = 'binary_sensor ska vara "på" när...';
-    card.appendChild(triggerLabel);
-    const triggerRow = document.createElement("div");
-    triggerRow.className = "cc-row";
-    const triggerSelect = this._buildTriggerModeSelect(sensorEntry.trigger_mode);
-    triggerRow.appendChild(triggerSelect);
-    card.appendChild(triggerRow);
-
-    const sensorTypeLabel = document.createElement("div");
-    sensorTypeLabel.className = "cc-section-title";
-    sensorTypeLabel.textContent = "Sensor-typer att skapa";
-    card.appendChild(sensorTypeLabel);
-    const sensorTypeRow = document.createElement("div");
-    sensorTypeRow.className = "cc-row";
-    const binaryLabel = document.createElement("label");
-    const binaryCb = document.createElement("input");
-    binaryCb.type = "checkbox";
-    binaryCb.checked = sensorEntry.create_binary_sensor;
-    binaryLabel.appendChild(binaryCb);
-    binaryLabel.append(" binary_sensor (på/av)");
-    const sensorLabel = document.createElement("label");
-    const sensorCb = document.createElement("input");
-    sensorCb.type = "checkbox";
-    sensorCb.checked = sensorEntry.create_sensor;
-    sensorLabel.appendChild(sensorCb);
-    sensorLabel.append(" sensor (aktuellt/nästa event)");
-    sensorTypeRow.appendChild(binaryLabel);
-    sensorTypeRow.appendChild(sensorLabel);
-    card.appendChild(sensorTypeRow);
-
-    const errorBox = document.createElement("div");
-    errorBox.className = "cc-error";
-    card.appendChild(errorBox);
-
-    const actions = document.createElement("div");
-    actions.className = "cc-actions";
-
-    const saveBtn = document.createElement("button");
-    saveBtn.textContent = "Spara";
-    saveBtn.onclick = async () => {
-      errorBox.textContent = "";
-      const selectedSources = sourcePicker.getSelected();
-      const values = filterControls.getValues();
-      try {
-        await this._hass.callWS({
-          type: "cal_combiner/update_activity_sensor",
-          entry_id: sensorEntry.entry_id,
-          name: nameInput.value || sensorEntry.name,
-          sources: selectedSources,
-          icon: iconPicker.getValue(),
-          picture: picturePicker.getValue(),
-          field: values.field,
-          include: values.include,
-          exclude: values.exclude,
-          use_regex: values.use_regex,
-          case_sensitive: values.case_sensitive,
-          trigger_mode: triggerSelect.value,
-          create_binary_sensor: binaryCb.checked,
-          create_sensor: sensorCb.checked,
-        });
-        await this._reload();
-      } catch (err) {
-        errorBox.textContent = err.message || "Kunde inte spara ändringarna";
-      }
-    };
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "danger";
-    deleteBtn.textContent = "Ta bort sensor";
-    deleteBtn.onclick = async () => {
-      if (!confirm(`Ta bort "${sensorEntry.name}"? Detta går inte att ångra.`)) return;
-      await this._hass.callWS({ type: "cal_combiner/delete_entry", entry_id: sensorEntry.entry_id });
-      await this._reload();
-    };
-
-    actions.appendChild(saveBtn);
-    actions.appendChild(deleteBtn);
-    card.appendChild(actions);
-
-    card.appendChild(this._buildActivityLogBox(sensorEntry.entry_id));
-
-    return card;
-  }
-
-  _renderNewActivitySensorCard() {
-    const card = document.createElement("div");
-    card.className = "cc-card cc-new-card";
-
     const title = document.createElement("div");
     title.className = "cc-section-title";
-    title.textContent = "Skapa ny aktivitetssensor";
+    title.textContent = "CalDAV-konto (redigera direkt i kalenderappen)";
     card.appendChild(title);
 
-    const nameRow = document.createElement("div");
-    nameRow.className = "cc-row";
-    const nameInput = document.createElement("input");
-    nameInput.type = "text";
-    nameInput.placeholder = "Namn, t.ex. Zoo-besök";
-    nameRow.appendChild(nameInput);
-    card.appendChild(nameRow);
+    const info = document.createElement("p");
+    info.className = "subtitle";
+    info.style.marginBottom = "8px";
+    info.textContent =
+      'Lägg till ETT CalDAV-konto (Apple Kalender, Thunderbird, DAVx5 på Android) med uppgifterna nedan - varje kryssad kalender nedan dyker upp som en egen kalender i appen. Google Kalender saknar stöd för externa CalDAV-konton och kan bara prenumerera read-only (se varje kalenders "Dela kalendern"-länk under fliken Kalendrar).';
+    card.appendChild(info);
 
-    const iconLabel = document.createElement("div");
-    iconLabel.className = "cc-section-title";
-    iconLabel.textContent = "Ikon";
-    card.appendChild(iconLabel);
-    const iconPicker = this._buildIconPicker("");
-    card.appendChild(iconPicker.element);
+    const fieldsBox = document.createElement("div");
+    fieldsBox.textContent = "Laddar…";
+    card.appendChild(fieldsBox);
 
-    const pictureLabel = document.createElement("div");
-    pictureLabel.className = "cc-section-title";
-    pictureLabel.textContent = "Bild";
-    card.appendChild(pictureLabel);
-    const picturePicker = this._buildPicturePicker("");
-    card.appendChild(picturePicker.element);
+    const calListLabel = document.createElement("div");
+    calListLabel.className = "cc-section-title";
+    calListLabel.textContent = "Kalendrar i CalDAV-kontot";
+    card.appendChild(calListLabel);
 
-    const sourcesLabel = document.createElement("div");
-    sourcesLabel.className = "cc-section-title";
-    sourcesLabel.textContent = "Källkalendrar";
-    card.appendChild(sourcesLabel);
-    const sourcePicker = this._buildSourcePicker([]);
-    card.appendChild(sourcePicker.element);
-
-    const filterLabel = document.createElement("div");
-    filterLabel.className = "cc-section-title";
-    filterLabel.textContent = "Filter";
-    card.appendChild(filterLabel);
-    const filterControls = this._buildFilterFieldsControls({});
-    card.appendChild(filterControls.element);
-
-    const triggerLabel = document.createElement("div");
-    triggerLabel.className = "cc-section-title";
-    triggerLabel.textContent = 'binary_sensor ska vara "på" när...';
-    card.appendChild(triggerLabel);
-    const triggerRow = document.createElement("div");
-    triggerRow.className = "cc-row";
-    const triggerSelect = this._buildTriggerModeSelect("active_now");
-    triggerRow.appendChild(triggerSelect);
-    card.appendChild(triggerRow);
-
-    const sensorTypeLabel = document.createElement("div");
-    sensorTypeLabel.className = "cc-section-title";
-    sensorTypeLabel.textContent = "Sensor-typer att skapa";
-    card.appendChild(sensorTypeLabel);
-    const sensorTypeRow = document.createElement("div");
-    sensorTypeRow.className = "cc-row";
-    const binaryLabel = document.createElement("label");
-    const binaryCb = document.createElement("input");
-    binaryCb.type = "checkbox";
-    binaryCb.checked = true;
-    binaryLabel.appendChild(binaryCb);
-    binaryLabel.append(" binary_sensor (på/av)");
-    const sensorLabel = document.createElement("label");
-    const sensorCb = document.createElement("input");
-    sensorCb.type = "checkbox";
-    sensorCb.checked = true;
-    sensorLabel.appendChild(sensorCb);
-    sensorLabel.append(" sensor (aktuellt/nästa event)");
-    sensorTypeRow.appendChild(binaryLabel);
-    sensorTypeRow.appendChild(sensorLabel);
-    card.appendChild(sensorTypeRow);
+    const calList = document.createElement("div");
+    calList.textContent = "Laddar…";
+    card.appendChild(calList);
 
     const errorBox = document.createElement("div");
     errorBox.className = "cc-error";
     card.appendChild(errorBox);
 
-    const createBtn = document.createElement("button");
-    createBtn.textContent = "Skapa sensor";
-    createBtn.onclick = async () => {
-      errorBox.textContent = "";
-      const selectedSources = sourcePicker.getSelected();
-      if (!nameInput.value.trim()) {
-        errorBox.textContent = "Ange ett namn";
-        return;
-      }
-      if (!selectedSources.length) {
-        errorBox.textContent = "Välj minst en källkalender";
-        return;
-      }
-      if (!binaryCb.checked && !sensorCb.checked) {
-        errorBox.textContent = "Välj minst en sensor-typ";
-        return;
-      }
-      const values = filterControls.getValues();
-      try {
-        const result = await this._hass.callWS({
-          type: "cal_combiner/create_activity_sensor",
-          name: nameInput.value.trim(),
-          sources: selectedSources,
-          icon: iconPicker.getValue(),
-          picture: picturePicker.getValue(),
-          field: values.field,
-          include: values.include,
-          exclude: values.exclude,
-          use_regex: values.use_regex,
-          case_sensitive: values.case_sensitive,
-          trigger_mode: triggerSelect.value,
-          create_binary_sensor: binaryCb.checked,
-          create_sensor: sensorCb.checked,
-        });
-        this._activeSensorKey = result.entry_id;
-        await this._reload();
-      } catch (err) {
-        errorBox.textContent = err.message || "Kunde inte skapa sensorn";
-      }
-    };
-    card.appendChild(createBtn);
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "Spara vilka kalendrar som ingår";
+    saveBtn.style.display = "none";
 
-    return card;
+    this._hass
+      .callWS({ type: "cal_combiner/get_caldav_settings" })
+      .then((resp) => {
+        fieldsBox.innerHTML = "";
+        if (!resp.server_url) {
+          const warn = document.createElement("div");
+          warn.className = "cc-warning";
+          warn.textContent =
+            'Ingen "Home Assistant-URL" är konfigurerad (Inställningar → System → Nätverk), så CalDAV-kontot kan inte visas fullständigt än.';
+          fieldsBox.appendChild(warn);
+        } else {
+          [
+            { value: resp.server_url, title: "Server-URL" },
+            { value: "cal_combiner", title: "Användarnamn (valfritt värde)" },
+            { value: resp.password, title: "Lösenord" },
+          ].forEach(({ value, title }) => {
+            const row = document.createElement("div");
+            row.className = "cc-feed-row";
+            const fieldLabel = document.createElement("span");
+            fieldLabel.className = "cc-caldav-field-label";
+            fieldLabel.textContent = title;
+            const input = document.createElement("input");
+            input.type = "text";
+            input.readOnly = true;
+            input.value = value;
+            input.onclick = () => input.select();
+            const copyBtn = document.createElement("button");
+            copyBtn.type = "button";
+            copyBtn.className = "secondary";
+            copyBtn.textContent = "Kopiera";
+            copyBtn.onclick = async () => {
+              try {
+                await navigator.clipboard.writeText(value);
+                copyBtn.textContent = "Kopierad!";
+              } catch (err) {
+                input.select();
+                copyBtn.textContent = "Markerad";
+              }
+              setTimeout(() => (copyBtn.textContent = "Kopiera"), 1500);
+            };
+            row.appendChild(fieldLabel);
+            row.appendChild(input);
+            row.appendChild(copyBtn);
+            fieldsBox.appendChild(row);
+          });
+        }
+
+        calList.innerHTML = "";
+        if (!resp.calendars.length) {
+          const empty = document.createElement("div");
+          empty.className = "cc-chip-empty";
+          empty.textContent = "Inga sammanslagna kalendrar skapade ännu";
+          calList.appendChild(empty);
+          return;
+        }
+
+        const checkboxes = [];
+        resp.calendars.forEach((cal) => {
+          const row = document.createElement("label");
+          row.className = "cc-check-row";
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = resp.included.includes(cal.entry_id);
+          cb.dataset.entryId = cal.entry_id;
+          checkboxes.push(cb);
+          row.appendChild(cb);
+          row.append(cal.name);
+          calList.appendChild(row);
+        });
+
+        saveBtn.style.display = "inline-block";
+        saveBtn.onclick = async () => {
+          errorBox.textContent = "";
+          const included = checkboxes.filter((cb) => cb.checked).map((cb) => cb.dataset.entryId);
+          try {
+            await this._hass.callWS({ type: "cal_combiner/set_caldav_included", included });
+            saveBtn.textContent = "Sparat!";
+            setTimeout(() => (saveBtn.textContent = "Spara vilka kalendrar som ingår"), 1500);
+          } catch (err) {
+            errorBox.textContent = err.message || "Kunde inte spara";
+          }
+        };
+      })
+      .catch((err) => {
+        fieldsBox.textContent = "Kunde inte hämta CalDAV-inställningar";
+        calList.textContent = "";
+        console.warn("Cal Combiner: kunde inte hämta CalDAV-inställningar", err);
+      });
+
+    card.appendChild(saveBtn);
+    wrap.appendChild(card);
+    return wrap;
   }
 }
 

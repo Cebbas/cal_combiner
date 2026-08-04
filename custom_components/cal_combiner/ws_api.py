@@ -7,25 +7,9 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
+from . import caldav
 from .activity_log import async_clear, async_get_entries, async_log
-from .caldav import caldav_url
-from .const import (
-    CONF_CREATE_BINARY,
-    CONF_CREATE_SENSOR,
-    CONF_ENTRY_TYPE,
-    CONF_FILTER,
-    CONF_FILTERS,
-    CONF_ICON,
-    CONF_NAME,
-    CONF_PICTURE,
-    CONF_SOURCES,
-    CONF_TOKEN,
-    CONF_TRIGGER_MODE,
-    DOMAIN,
-    ENTRY_TYPE_ACTIVITY,
-    ENTRY_TYPE_MERGE,
-    TRIGGER_MODE_ACTIVE,
-)
+from .const import CONF_FILTERS, CONF_ICON, CONF_NAME, CONF_PICTURE, CONF_SOURCES, CONF_TOKEN, DOMAIN
 
 
 def _feed_url(hass: HomeAssistant, entry) -> str | None:
@@ -50,8 +34,6 @@ def _entry_to_dict(hass: HomeAssistant, entry) -> dict:
         "feed_url_webcal": feed_url.replace("https://", "webcal://").replace("http://", "webcal://")
         if feed_url
         else None,
-        "caldav_url": caldav_url(hass, entry.entry_id),
-        "caldav_password": entry.data.get(CONF_TOKEN),
     }
 
 
@@ -59,11 +41,7 @@ def _entry_to_dict(hass: HomeAssistant, entry) -> dict:
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list_entries"})
 @websocket_api.async_response
 async def ws_list_entries(hass: HomeAssistant, connection, msg):
-    entries = [
-        e
-        for e in hass.config_entries.async_entries(DOMAIN)
-        if e.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_MERGE) == ENTRY_TYPE_MERGE
-    ]
+    entries = hass.config_entries.async_entries(DOMAIN)
     connection.send_result(msg["id"], {"entries": [_entry_to_dict(hass, e) for e in entries]})
 
 
@@ -187,162 +165,19 @@ async def ws_update_filter(hass: HomeAssistant, connection, msg):
     connection.send_result(msg["id"], {"ok": True})
 
 
-def _activity_entry_to_dict(entry) -> dict:
-    return {
-        "entry_id": entry.entry_id,
-        "name": entry.data.get(CONF_NAME),
-        "sources": entry.data.get(CONF_SOURCES, []),
-        "icon": entry.data.get(CONF_ICON),
-        "picture": entry.data.get(CONF_PICTURE),
-        "filter": entry.data.get(CONF_FILTER),
-        "trigger_mode": entry.data.get(CONF_TRIGGER_MODE, TRIGGER_MODE_ACTIVE),
-        "create_binary_sensor": entry.data.get(CONF_CREATE_BINARY, True),
-        "create_sensor": entry.data.get(CONF_CREATE_SENSOR, True),
-    }
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/list_activity_sensors"})
-@websocket_api.async_response
-async def ws_list_activity_sensors(hass: HomeAssistant, connection, msg):
-    entries = [
-        e
-        for e in hass.config_entries.async_entries(DOMAIN)
-        if e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_ACTIVITY
-    ]
-    connection.send_result(
-        msg["id"], {"entries": [_activity_entry_to_dict(e) for e in entries]}
-    )
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/create_activity_sensor",
-        vol.Required("name"): str,
-        vol.Required("sources"): [str],
-        vol.Optional("icon"): vol.Any(str, None),
-        vol.Optional("picture"): vol.Any(str, None),
-        vol.Optional("field", default="any"): str,
-        vol.Optional("include", default=""): str,
-        vol.Optional("exclude", default=""): str,
-        vol.Optional("use_regex", default=False): bool,
-        vol.Optional("case_sensitive", default=False): bool,
-        vol.Optional("trigger_mode", default=TRIGGER_MODE_ACTIVE): str,
-        vol.Optional("create_binary_sensor", default=True): bool,
-        vol.Optional("create_sensor", default=True): bool,
-    }
-)
-@websocket_api.async_response
-async def ws_create_activity_sensor(hass: HomeAssistant, connection, msg):
-    if not msg["sources"]:
-        connection.send_error(msg["id"], "no_sources", "Välj minst en källkalender")
-        return
-    if not (msg["create_binary_sensor"] or msg["create_sensor"]):
-        connection.send_error(msg["id"], "no_sensor_type", "Välj minst en sensor-typ")
-        return
-
-    payload = {k: v for k, v in msg.items() if k != "type"}
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "activity_sensor"}, data=payload
-    )
-    if result.get("type") == "form":
-        connection.send_error(msg["id"], "invalid_input", "Kunde inte skapa sensorn")
-        return
-    entry_id = result["result"].entry_id
-    await async_log(hass, entry_id, "Sensor skapad")
-    connection.send_result(msg["id"], {"ok": True, "entry_id": entry_id})
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command(
-    {
-        vol.Required("type"): f"{DOMAIN}/update_activity_sensor",
-        vol.Required("entry_id"): str,
-        vol.Required("name"): str,
-        vol.Required("sources"): [str],
-        vol.Optional("icon"): vol.Any(str, None),
-        vol.Optional("picture"): vol.Any(str, None),
-        vol.Optional("field", default="any"): str,
-        vol.Optional("include", default=""): str,
-        vol.Optional("exclude", default=""): str,
-        vol.Optional("use_regex", default=False): bool,
-        vol.Optional("case_sensitive", default=False): bool,
-        vol.Optional("trigger_mode", default=TRIGGER_MODE_ACTIVE): str,
-        vol.Optional("create_binary_sensor", default=True): bool,
-        vol.Optional("create_sensor", default=True): bool,
-    }
-)
-@websocket_api.async_response
-async def ws_update_activity_sensor(hass: HomeAssistant, connection, msg):
-    entry = hass.config_entries.async_get_entry(msg["entry_id"])
-    if entry is None or entry.domain != DOMAIN or entry.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_ACTIVITY:
-        connection.send_error(msg["id"], "not_found", "Hittade inte sensorn")
-        return
-    if not msg["sources"]:
-        connection.send_error(msg["id"], "no_sources", "Välj minst en källkalender")
-        return
-    if not (msg["create_binary_sensor"] or msg["create_sensor"]):
-        connection.send_error(msg["id"], "no_sensor_type", "Välj minst en sensor-typ")
-        return
-
-    include = [w.strip() for w in msg["include"].split(",") if w.strip()]
-    exclude = [w.strip() for w in msg["exclude"].split(",") if w.strip()]
-    rule = (
-        {
-            "field": msg["field"],
-            "include": include,
-            "exclude": exclude,
-            "use_regex": msg["use_regex"],
-            "case_sensitive": msg["case_sensitive"],
-        }
-        if (include or exclude)
-        else None
-    )
-
-    changes = []
-    if msg["name"] != entry.data.get(CONF_NAME):
-        changes.append(f'namn ändrat till "{msg["name"]}"')
-    if set(msg["sources"]) != set(entry.data.get(CONF_SOURCES, [])):
-        changes.append("källor uppdaterade")
-    if rule != entry.data.get(CONF_FILTER):
-        changes.append("filter uppdaterat")
-    if msg["trigger_mode"] != entry.data.get(CONF_TRIGGER_MODE, TRIGGER_MODE_ACTIVE):
-        changes.append("triggerläge ändrat")
-    if msg.get("icon") != entry.data.get(CONF_ICON):
-        changes.append("ikon ändrad")
-    if msg.get("picture") != entry.data.get(CONF_PICTURE):
-        changes.append("bild ändrad")
-
-    new_data = dict(entry.data)
-    new_data[CONF_NAME] = msg["name"]
-    new_data[CONF_SOURCES] = msg["sources"]
-    new_data[CONF_ICON] = msg.get("icon")
-    new_data[CONF_PICTURE] = msg.get("picture")
-    new_data[CONF_FILTER] = rule
-    new_data[CONF_TRIGGER_MODE] = msg["trigger_mode"]
-    new_data[CONF_CREATE_BINARY] = msg["create_binary_sensor"]
-    new_data[CONF_CREATE_SENSOR] = msg["create_sensor"]
-    hass.config_entries.async_update_entry(entry, data=new_data, title=msg["name"])
-    await hass.config_entries.async_reload(entry.entry_id)
-    if changes:
-        await async_log(hass, entry.entry_id, "Uppdaterad: " + "; ".join(changes))
-    connection.send_result(msg["id"], {"ok": True})
-
-
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/delete_entry", vol.Required("entry_id"): str}
 )
 @websocket_api.async_response
 async def ws_delete_entry(hass: HomeAssistant, connection, msg):
-    """Deletes any Cal Combiner entry, merged calendar or activity sensor alike."""
     entry = hass.config_entries.async_get_entry(msg["entry_id"])
     if entry is None or entry.domain != DOMAIN:
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
     await hass.config_entries.async_remove(msg["entry_id"])
     await async_clear(hass, msg["entry_id"])
+    await caldav.async_forget_entry(hass, msg["entry_id"])
     connection.send_result(msg["id"], {"ok": True})
 
 
@@ -356,6 +191,33 @@ async def ws_get_activity_log(hass: HomeAssistant, connection, msg):
     connection.send_result(msg["id"], {"entries": entries})
 
 
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/get_caldav_settings"})
+@websocket_api.async_response
+async def ws_get_caldav_settings(hass: HomeAssistant, connection, msg):
+    settings = await caldav.async_get_settings(hass)
+    entries = hass.config_entries.async_entries(DOMAIN)
+    connection.send_result(
+        msg["id"],
+        {
+            "server_url": caldav.caldav_base_url(hass),
+            "password": settings["token"],
+            "included": settings["included"],
+            "calendars": [{"entry_id": e.entry_id, "name": e.data.get(CONF_NAME)} for e in entries],
+        },
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/set_caldav_included", vol.Required("included"): [str]}
+)
+@websocket_api.async_response
+async def ws_set_caldav_included(hass: HomeAssistant, connection, msg):
+    await caldav.async_set_included(hass, msg["included"])
+    connection.send_result(msg["id"], {"ok": True})
+
+
 def async_register_ws_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list_entries)
     websocket_api.async_register_command(hass, ws_list_calendars)
@@ -363,7 +225,6 @@ def async_register_ws_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_update_entry)
     websocket_api.async_register_command(hass, ws_update_filter)
     websocket_api.async_register_command(hass, ws_delete_entry)
-    websocket_api.async_register_command(hass, ws_list_activity_sensors)
-    websocket_api.async_register_command(hass, ws_create_activity_sensor)
-    websocket_api.async_register_command(hass, ws_update_activity_sensor)
     websocket_api.async_register_command(hass, ws_get_activity_log)
+    websocket_api.async_register_command(hass, ws_get_caldav_settings)
+    websocket_api.async_register_command(hass, ws_set_caldav_included)

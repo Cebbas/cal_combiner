@@ -200,6 +200,8 @@ async def update_event(
         source = _get_source_entity(hass, marker)
         if source is None:
             raise HomeAssistantError(f"Källkalendern {marker} hittades inte")
+        if not source.supported_features & CalendarEntityFeature.UPDATE_EVENT:
+            raise HomeAssistantError(f"Källkalendern {marker} stödjer inte redigering av event")
         await source.async_update_event(
             orig_uid, event, recurrence_id=recurrence_id, recurrence_range=recurrence_range
         )
@@ -222,6 +224,8 @@ async def delete_event(
         source = _get_source_entity(hass, marker)
         if source is None:
             raise HomeAssistantError(f"Källkalendern {marker} hittades inte")
+        if not source.supported_features & CalendarEntityFeature.DELETE_EVENT:
+            raise HomeAssistantError(f"Källkalendern {marker} stödjer inte borttagning av event")
         await source.async_delete_event(
             orig_uid, recurrence_id=recurrence_id, recurrence_range=recurrence_range
         )

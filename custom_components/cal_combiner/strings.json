@@ -2,12 +2,6 @@
   "config": {
     "step": {
       "user": {
-        "menu_options": {
-          "merge_calendar": "Sammanslagen kalender",
-          "activity_sensor": "Aktivitetssensor"
-        }
-      },
-      "merge_calendar": {
         "title": "Skapa sammanslagen kalender",
         "description": "Cal Combiner skapar automatiskt en egen kalender som nya event skrivs till som standard. Du kan lägga till fler källkalendrar nu eller senare i panelen.",
         "data": {
@@ -16,29 +10,7 @@
           "icon": "Ikon",
           "picture": "Bild"
         }
-      },
-      "activity_sensor": {
-        "title": "Skapa aktivitetssensor",
-        "description": "Skapar sensorer som visar om ett filtrerat event pågår just nu / vad nästa är. Lämna include/exclude tomma för att inte filtrera alls.",
-        "data": {
-          "name": "Namn",
-          "sources": "Källkalendrar (välj flera)",
-          "icon": "Ikon",
-          "picture": "Bild",
-          "field": "Fält att matcha mot",
-          "include": "Inkludera bara event som innehåller (ex: Zoo, Djurpark)",
-          "exclude": "Uteslut event som innehåller (ex: Zoo, Privat)",
-          "use_regex": "Tolka orden som regex-mönster",
-          "case_sensitive": "Skiftlägeskänslig",
-          "trigger_mode": "Sensorn ska vara \"på\" när",
-          "create_binary_sensor": "Skapa binary_sensor (på/av)",
-          "create_sensor": "Skapa sensor (visar aktuellt/nästa event)"
-        }
       }
-    },
-    "error": {
-      "no_sources": "Välj minst en källkalender",
-      "no_sensor_type": "Välj minst en sensor-typ (binary_sensor och/eller sensor)"
     }
   },
   "options": {
@@ -78,35 +50,10 @@
           "case_sensitive": "Skiftlägeskänslig",
           "use_regex": "Tolka orden som regex-mönster istället för vanlig text"
         }
-      },
-      "edit_activity_sensor": {
-        "title": "Redigera aktivitetssensor",
-        "data": {
-          "name": "Namn",
-          "sources": "Källkalendrar (välj flera)",
-          "icon": "Ikon",
-          "picture": "Bild",
-          "field": "Fält att matcha mot",
-          "include": "Inkludera bara event som innehåller (ex: Zoo, Djurpark)",
-          "exclude": "Uteslut event som innehåller (ex: Zoo, Privat)",
-          "use_regex": "Tolka orden som regex-mönster",
-          "case_sensitive": "Skiftlägeskänslig",
-          "trigger_mode": "Sensorn ska vara \"på\" när",
-          "create_binary_sensor": "Skapa binary_sensor (på/av)",
-          "create_sensor": "Skapa sensor (visar aktuellt/nästa event)"
-        }
       }
     },
     "abort": {
       "no_sources": "Lägg till minst en källkalender under \"Redigera källor\" innan du sätter filter"
-    }
-  },
-  "selector": {
-    "trigger_mode": {
-      "options": {
-        "active_now": "Ett event pågår just nu",
-        "today": "Ett event inträffar någon gång idag"
-      }
     }
   }
 }

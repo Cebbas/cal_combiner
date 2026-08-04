@@ -15,12 +15,16 @@ REPORT calendar-query (a full listing; sync-collection is a possible later
 addition - see IDEAS.md), and GET/PUT/DELETE for individual object
 resources.
 
-Resource model: each entry has one collection at
-`/api/cal_combiner/{entry_id}/dav` which doubles as the principal,
-calendar-home-set, and the one calendar collection (a standard
-simplification for a single-calendar personal CalDAV account - clients
-handle a self-referential hierarchy fine). Each event uid becomes an object
-resource at `.../dav/{quoted-uid}.ics`.
+Resource model: ONE account for the whole integration, not one per merged
+calendar. `/api/cal_combiner/dav` is the principal and calendar-home-set;
+PROPFIND depth 1 on it lists every merged calendar the user has opted into
+exposing (see the settings store below) as a child collection at
+`/api/cal_combiner/dav/{entry_id}`, which is otherwise a normal
+single-calendar collection exactly like earlier versions of this file
+exposed at the top level. This matches how every real CalDAV account works
+(one login, many calendars) instead of forcing one CalDAV account per
+Cal Combiner calendar. Each event uid becomes an object resource at
+`.../dav/{entry_id}/{quoted-uid}.ics`.
 
 For the calendar's own store, a recurring event's master VEVENT and any
 single-occurrence overrides are bundled as multiple VEVENTs sharing one uid
@@ -31,11 +35,11 @@ the exact routing `calendar.py` already uses for Home Assistant's own
 dashboard) as flat one-off resources, since `calendar.get_events` already
 hands those to us pre-expanded - we never see their own RRULE, if any.
 
-Auth is HTTP Basic (any username, password = the entry's existing secret
-token, same one already used for the ICS feed) since that's the literal
-username/password form Apple Calendar's "Other -> Add CalDAV Account" dialog
-and DAVx5 require - there's no "paste a secret URL" flow like webcal
-subscription for CalDAV account setup.
+Auth is HTTP Basic (any username, one shared password for the whole account,
+stored below) since that's the literal username/password form Apple
+Calendar's "Other -> Add CalDAV Account" dialog and DAVx5 require - there's
+no "paste a secret URL" flow like webcal subscription for CalDAV account
+setup.
 """
 from __future__ import annotations
 
@@ -44,6 +48,7 @@ from datetime import timedelta
 import hashlib
 import hmac
 import logging
+import secrets
 from typing import Any
 from urllib.parse import quote, unquote
 import xml.etree.ElementTree as ET
@@ -57,17 +62,19 @@ from homeassistant.components.calendar import CalendarEvent
 from homeassistant.components.http import KEY_HASS
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .calendar import _parse_merged_uid, delete_event, fetch_merged_events, update_event
-from .const import CONF_FILTERS, CONF_NAME, CONF_SOURCES, CONF_TOKEN, DOMAIN
+from .const import CONF_FILTERS, CONF_NAME, CONF_SOURCES, DOMAIN
 from .own_calendar import OwnCalendarStore, _as_datetime, _parse as parse_dt
 
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = "cal_combiner_caldav_registered"
 
-BASE_PATH = "/api/cal_combiner/{entry_id}/dav"
-OBJECT_PATH = "/api/cal_combiner/{entry_id}/dav/{uid}.ics"
+BASE_PATH = "/api/cal_combiner/dav"
+COLLECTION_PATH = "/api/cal_combiner/dav/{entry_id}"
+OBJECT_PATH = "/api/cal_combiner/dav/{entry_id}/{uid}.ics"
 
 # How far to look when a request carries no explicit time-range (a plain GET
 # on one resource, or a REPORT/PROPFIND without a parseable filter).
@@ -78,6 +85,78 @@ DAV_NS = "DAV:"
 CALDAV_NS = "urn:ietf:params:xml:ns:caldav"
 CS_NS = "http://calendarserver.org/ns/"
 
+STORAGE_VERSION = 1
+_SETTINGS_KEY = f"{DOMAIN}_caldav_server"
+
+
+# ---- server-wide settings (shared password + which calendars are exposed) ----
+
+
+def _settings_store(hass: HomeAssistant) -> Store:
+    return Store(hass, STORAGE_VERSION, _SETTINGS_KEY)
+
+
+async def _load_settings(hass: HomeAssistant) -> dict:
+    data = await _settings_store(hass).async_load()
+    if not data:
+        data = {"token": secrets.token_urlsafe(24), "included": [], "known": []}
+    data.setdefault("token", secrets.token_urlsafe(24))
+    data.setdefault("included", [])
+    data.setdefault("known", [])
+    return data
+
+
+async def async_get_settings(hass: HomeAssistant) -> dict:
+    """Full settings dict: {"token", "included" (entry_ids), "known" (entry_ids ever seen)}."""
+    return await _load_settings(hass)
+
+
+async def async_ensure_entry_known(hass: HomeAssistant, entry_id: str) -> None:
+    """First time a merged calendar is set up, expose it via CalDAV by default.
+
+    Later removals from the "included" list (done explicitly in the Server
+    tab) are respected on every subsequent reload/restart, since we only
+    default-include a calendar the very first time we ever see its entry_id.
+    """
+    data = await _load_settings(hass)
+    if entry_id in data["known"]:
+        return
+    data["known"].append(entry_id)
+    if entry_id not in data["included"]:
+        data["included"].append(entry_id)
+    await _settings_store(hass).async_save(data)
+
+
+async def async_set_included(hass: HomeAssistant, included: list[str]) -> None:
+    data = await _load_settings(hass)
+    data["included"] = included
+    await _settings_store(hass).async_save(data)
+
+
+async def async_forget_entry(hass: HomeAssistant, entry_id: str) -> None:
+    """Called when a merged calendar is deleted, to keep the settings tidy."""
+    data = await _load_settings(hass)
+    changed = False
+    if entry_id in data["included"]:
+        data["included"].remove(entry_id)
+        changed = True
+    if entry_id in data["known"]:
+        data["known"].remove(entry_id)
+        changed = True
+    if changed:
+        await _settings_store(hass).async_save(data)
+
+
+def caldav_base_url(hass: HomeAssistant) -> str | None:
+    """Server URL field for the CalDAV account (one account, many calendars)."""
+    from homeassistant.helpers.network import NoURLAvailableError, get_url
+
+    try:
+        base_url = get_url(hass, allow_internal=True, allow_ip=True, prefer_external=True)
+    except NoURLAvailableError:
+        return None
+    return f"{base_url}{BASE_PATH}/"
+
 
 # ---- auth / entry resolution ----
 
@@ -86,7 +165,7 @@ def _entry_data(hass: HomeAssistant, entry_id: str) -> dict | None:
     return hass.data.get(DOMAIN, {}).get(entry_id)
 
 
-def _check_auth(request: web.Request, entry) -> bool:
+async def _check_auth(request: web.Request, hass: HomeAssistant) -> bool:
     header = request.headers.get(hdrs.AUTHORIZATION, "")
     if not header.startswith("Basic "):
         return False
@@ -95,7 +174,8 @@ def _check_auth(request: web.Request, entry) -> bool:
     except (ValueError, UnicodeDecodeError):
         return False
     _username, _, password = decoded.partition(":")
-    token = entry.data.get(CONF_TOKEN, "")
+    settings = await async_get_settings(hass)
+    token = settings["token"]
     return bool(token) and hmac.compare_digest(password, token)
 
 
@@ -103,27 +183,39 @@ def _unauthorized() -> web.Response:
     return web.Response(status=401, headers={"WWW-Authenticate": 'Basic realm="Cal Combiner"'})
 
 
-async def _authorize(request: web.Request):
-    """Common preamble for every handler: resolve hass/entry/store, check auth.
+async def _authorize_root(request: web.Request):
+    """Preamble for the account-level (principal) routes: just checks auth."""
+    hass = request.app[KEY_HASS]
+    if not await _check_auth(request, hass):
+        return _unauthorized()
+    return hass
+
+
+async def _authorize_collection(request: web.Request):
+    """Preamble for one calendar's routes: auth + must be an exposed calendar.
 
     Returns (hass, entry, store) on success, or a web.Response to return as-is.
     """
     hass = request.app[KEY_HASS]
+    if not await _check_auth(request, hass):
+        return _unauthorized()
+
     entry_id = request.match_info["entry_id"]
+    settings = await async_get_settings(hass)
+    if entry_id not in settings["included"]:
+        return web.Response(status=404)
+
     data = _entry_data(hass, entry_id)
     if not data or "own_store" not in data:
         return web.Response(status=404)
-    entry = data["entry"]
-    if not _check_auth(request, entry):
-        return _unauthorized()
-    return hass, entry, data["own_store"]
+    return hass, data["entry"], data["own_store"]
 
 
 # ---- uid / href helpers ----
 
 
 def _collection_href(entry_id: str) -> str:
-    return BASE_PATH.format(entry_id=entry_id) + "/"
+    return COLLECTION_PATH.format(entry_id=entry_id) + "/"
 
 
 def _object_href(entry_id: str, uid: str) -> str:
@@ -218,6 +310,19 @@ def _external_event_to_ics(ev: CalendarEvent) -> str:
 # ---- XML building ----
 
 
+def _principal_propstat_xml(href: str, child_hrefs: list[str]) -> str:
+    href_x = xml_escape(href)
+    return f"""<D:response>
+<D:href>{href_x}</D:href>
+<D:propstat><D:prop>
+<D:resourcetype><D:collection/></D:resourcetype>
+<D:displayname>Cal Combiner</D:displayname>
+<D:current-user-principal><D:href>{href_x}</D:href></D:current-user-principal>
+<C:calendar-home-set><D:href>{href_x}</D:href></C:calendar-home-set>
+</D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
+</D:response>"""
+
+
 def _collection_propstat_xml(href: str, name: str, ctag: int) -> str:
     href_x, name_x = xml_escape(href), xml_escape(name)
     return f"""<D:response>
@@ -225,8 +330,6 @@ def _collection_propstat_xml(href: str, name: str, ctag: int) -> str:
 <D:propstat><D:prop>
 <D:resourcetype><D:collection/><C:calendar/></D:resourcetype>
 <D:displayname>{name_x}</D:displayname>
-<D:current-user-principal><D:href>{href_x}</D:href></D:current-user-principal>
-<C:calendar-home-set><D:href>{href_x}</D:href></C:calendar-home-set>
 <C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set>
 <CS:getctag>{ctag}</CS:getctag>
 <D:supported-report-set><D:supported-report><D:report><C:calendar-query/></D:report></D:supported-report></D:supported-report-set>
@@ -283,7 +386,46 @@ def _parse_time_range(body: bytes):
     return default_start, default_end
 
 
-# ---- HTTP method handlers ----
+# ---- HTTP method handlers: account root (principal / calendar-home-set) ----
+
+
+async def handle_root_options(request: web.Request) -> web.Response:
+    return web.Response(
+        status=200,
+        headers={
+            "DAV": "1, 2, 3, calendar-access",
+            "Allow": "OPTIONS, PROPFIND",
+        },
+    )
+
+
+async def handle_root_propfind(request: web.Request) -> web.Response:
+    hass = await _authorize_root(request)
+    if isinstance(hass, web.Response):
+        return hass
+
+    depth = request.headers.get("Depth", "0")
+    href = BASE_PATH + "/"
+    responses = [_principal_propstat_xml(href, [])]
+
+    if depth == "1":
+        settings = await async_get_settings(hass)
+        for entry_id in settings["included"]:
+            data = _entry_data(hass, entry_id)
+            if not data or "own_store" not in data:
+                continue
+            entry = data["entry"]
+            store: OwnCalendarStore = data["own_store"]
+            responses.append(
+                _collection_propstat_xml(
+                    _collection_href(entry_id), entry.data.get(CONF_NAME, "Cal Combiner"), store.ctag
+                )
+            )
+
+    return web.Response(status=207, content_type="application/xml", charset="utf-8", text=_multistatus("".join(responses)))
+
+
+# ---- HTTP method handlers: one calendar collection ----
 
 
 async def handle_options(request: web.Request) -> web.Response:
@@ -297,7 +439,7 @@ async def handle_options(request: web.Request) -> web.Response:
 
 
 async def handle_propfind(request: web.Request) -> web.Response:
-    auth = await _authorize(request)
+    auth = await _authorize_collection(request)
     if isinstance(auth, web.Response):
         return auth
     hass, entry, store = auth
@@ -322,7 +464,7 @@ async def handle_propfind(request: web.Request) -> web.Response:
 
 
 async def handle_report(request: web.Request) -> web.Response:
-    auth = await _authorize(request)
+    auth = await _authorize_collection(request)
     if isinstance(auth, web.Response):
         return auth
     hass, entry, store = auth
@@ -348,7 +490,7 @@ async def handle_report(request: web.Request) -> web.Response:
 
 
 async def handle_get(request: web.Request) -> web.Response:
-    auth = await _authorize(request)
+    auth = await _authorize_collection(request)
     if isinstance(auth, web.Response):
         return auth
     hass, entry, store = auth
@@ -381,7 +523,7 @@ async def handle_get(request: web.Request) -> web.Response:
 
 
 async def handle_put(request: web.Request) -> web.Response:
-    auth = await _authorize(request)
+    auth = await _authorize_collection(request)
     if isinstance(auth, web.Response):
         return auth
     hass, entry, store = auth
@@ -460,7 +602,7 @@ async def handle_put(request: web.Request) -> web.Response:
 
 
 async def handle_delete(request: web.Request) -> web.Response:
-    auth = await _authorize(request)
+    auth = await _authorize_collection(request)
     if isinstance(auth, web.Response):
         return auth
     hass, entry, store = auth
@@ -492,7 +634,7 @@ def async_register_caldav(hass: HomeAssistant) -> None:
     request[KEY_AUTHENTICATED] based on Bearer tokens/signed URLs and never
     itself rejects a request - enforcement is normally the view wrapper's
     job, which we're bypassing, so every handler above does its own Basic
-    Auth check via _authorize().
+    Auth check via _check_auth().
     """
     if hass.data.get(_REGISTERED):
         return
@@ -504,6 +646,9 @@ def async_register_caldav(hass: HomeAssistant) -> None:
     # aiohttp treats ".../dav" and ".../dav/" as distinct routes with no
     # automatic normalization.
     for base in (BASE_PATH, f"{BASE_PATH}/"):
+        router.add_route("OPTIONS", base, handle_root_options)
+        router.add_route("PROPFIND", base, handle_root_propfind)
+    for base in (COLLECTION_PATH, f"{COLLECTION_PATH}/"):
         router.add_route("OPTIONS", base, handle_options)
         router.add_route("PROPFIND", base, handle_propfind)
         router.add_route("REPORT", base, handle_report)
@@ -511,14 +656,3 @@ def async_register_caldav(hass: HomeAssistant) -> None:
     router.add_route("GET", OBJECT_PATH, handle_get)
     router.add_route("PUT", OBJECT_PATH, handle_put)
     router.add_route("DELETE", OBJECT_PATH, handle_delete)
-
-
-def caldav_url(hass: HomeAssistant, entry_id: str) -> str | None:
-    """Base URL for the CalDAV account (Server URL field in the calendar app)."""
-    from homeassistant.helpers.network import NoURLAvailableError, get_url
-
-    try:
-        base_url = get_url(hass, allow_internal=True, allow_ip=True, prefer_external=True)
-    except NoURLAvailableError:
-        return None
-    return f"{base_url}{BASE_PATH.format(entry_id=entry_id)}/"

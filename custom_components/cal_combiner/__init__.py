@@ -8,16 +8,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.network import NoURLAvailableError, get_url
 
-from .const import (
-    CONF_ENTRY_TYPE,
-    CONF_NAME,
-    CONF_TOKEN,
-    DOMAIN,
-    ENTRY_TYPE_MERGE,
-    PLATFORMS_ACTIVITY,
-    PLATFORMS_MERGE,
-)
-from .caldav import async_register_caldav
+from .caldav import async_ensure_entry_known, async_register_caldav
+from .const import CONF_NAME, CONF_TOKEN, DOMAIN, PLATFORMS
 from .http import async_setup_feed_view
 from .panel import async_register_panel
 from .ws_api import async_register_ws_api
@@ -35,15 +27,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {"entry": entry}
 
-    entry_type = entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_MERGE)
-
-    if entry_type == ENTRY_TYPE_MERGE:
-        await async_setup_feed_view(hass)
-        async_register_caldav(hass)
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_MERGE)
-        _notify_feed_url(hass, entry)
-    else:
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS_ACTIVITY)
+    await async_setup_feed_view(hass)
+    async_register_caldav(hass)
+    await async_ensure_entry_known(hass, entry.entry_id)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _notify_feed_url(hass, entry)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
@@ -87,11 +75,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    entry_type = entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_MERGE)
-    platforms = PLATFORMS_MERGE if entry_type == ENTRY_TYPE_MERGE else PLATFORMS_ACTIVITY
-
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
-        hass.data[DOMAIN].pop(f"{entry.entry_id}_activity_coordinator", None)
     return unload_ok

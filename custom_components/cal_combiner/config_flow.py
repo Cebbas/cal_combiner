@@ -9,24 +9,7 @@ from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from .const import (
-    CONF_CREATE_BINARY,
-    CONF_CREATE_SENSOR,
-    CONF_ENTRY_TYPE,
-    CONF_FILTER,
-    CONF_ICON,
-    CONF_NAME,
-    CONF_PICTURE,
-    CONF_SOURCES,
-    CONF_TOKEN,
-    CONF_TRIGGER_MODE,
-    DOMAIN,
-    ENTRY_TYPE_ACTIVITY,
-    ENTRY_TYPE_MERGE,
-    FILTER_FIELDS,
-    TRIGGER_MODE_ACTIVE,
-    TRIGGER_MODES,
-)
+from .const import CONF_ICON, CONF_NAME, CONF_PICTURE, CONF_SOURCES, CONF_TOKEN, DOMAIN, FILTER_FIELDS
 
 
 def _build_filter_from_flat_input(user_input: dict) -> dict | None:
@@ -50,54 +33,14 @@ def _icon_and_picture_fields(defaults: dict) -> dict:
     }
 
 
-def _activity_sensor_schema(defaults: dict | None = None) -> vol.Schema:
-    defaults = defaults or {}
-    rule = defaults.get(CONF_FILTER) or {}
-    return vol.Schema(
-        {
-            vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "Aktivitet")): str,
-            vol.Required(
-                CONF_SOURCES, default=defaults.get(CONF_SOURCES, [])
-            ): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="calendar", multiple=True)
-            ),
-            **_icon_and_picture_fields(defaults),
-            vol.Optional("field", default=rule.get("field", "any")): vol.In(FILTER_FIELDS),
-            vol.Optional("include", default=", ".join(rule.get("include", []))): str,
-            vol.Optional("exclude", default=", ".join(rule.get("exclude", []))): str,
-            vol.Optional("use_regex", default=rule.get("use_regex", False)): bool,
-            vol.Optional("case_sensitive", default=rule.get("case_sensitive", False)): bool,
-            vol.Optional(
-                CONF_TRIGGER_MODE, default=defaults.get(CONF_TRIGGER_MODE, TRIGGER_MODE_ACTIVE)
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=TRIGGER_MODES,
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key=CONF_TRIGGER_MODE,
-                )
-            ),
-            vol.Optional(
-                "create_binary_sensor", default=defaults.get(CONF_CREATE_BINARY, True)
-            ): bool,
-            vol.Optional("create_sensor", default=defaults.get(CONF_CREATE_SENSOR, True)): bool,
-        }
-    )
-
-
 class CalendarMergeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Lets the user create either a merged calendar or an activity sensor."""
+    """Creates a merged calendar."""
 
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        return self.async_show_menu(
-            step_id="user", menu_options=["merge_calendar", "activity_sensor"]
-        )
-
-    async def async_step_merge_calendar(self, user_input=None):
         if user_input is not None:
             data = dict(user_input)
-            data[CONF_ENTRY_TYPE] = ENTRY_TYPE_MERGE
             data[CONF_TOKEN] = secrets.token_urlsafe(24)
             return self.async_create_entry(title=user_input[CONF_NAME], data=data)
 
@@ -110,33 +53,14 @@ class CalendarMergeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 **_icon_and_picture_fields({}),
             }
         )
-        return self.async_show_form(step_id="merge_calendar", data_schema=schema)
+        return self.async_show_form(step_id="user", data_schema=schema)
 
-    async def async_step_activity_sensor(self, user_input=None):
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            if not user_input[CONF_SOURCES]:
-                errors["sources"] = "no_sources"
-            elif not (user_input.get("create_binary_sensor") or user_input.get("create_sensor")):
-                errors["create_binary_sensor"] = "no_sensor_type"
-            else:
-                data = {
-                    CONF_ENTRY_TYPE: ENTRY_TYPE_ACTIVITY,
-                    CONF_NAME: user_input[CONF_NAME],
-                    CONF_SOURCES: user_input[CONF_SOURCES],
-                    CONF_ICON: user_input.get(CONF_ICON),
-                    CONF_PICTURE: user_input.get(CONF_PICTURE),
-                    CONF_FILTER: _build_filter_from_flat_input(user_input),
-                    CONF_TRIGGER_MODE: user_input.get(CONF_TRIGGER_MODE, TRIGGER_MODE_ACTIVE),
-                    CONF_CREATE_BINARY: user_input["create_binary_sensor"],
-                    CONF_CREATE_SENSOR: user_input["create_sensor"],
-                }
-                return self.async_create_entry(title=user_input[CONF_NAME], data=data)
-
-        return self.async_show_form(
-            step_id="activity_sensor", data_schema=_activity_sensor_schema(), errors=errors
-        )
+    # Kept as a separate context source (used by the sidebar panel's "create"
+    # button) even though it now shows the exact same form as async_step_user -
+    # having a distinct source lets the panel init the flow without going
+    # through the generic "user" entry point HA's own UI also uses.
+    async def async_step_merge_calendar(self, user_input=None):
+        return await self.async_step_user(user_input)
 
     @staticmethod
     @callback
@@ -145,19 +69,15 @@ class CalendarMergeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class CalendarMergeOptionsFlow(config_entries.OptionsFlow):
-    """Edit an existing merged calendar or activity sensor."""
+    """Edit an existing merged calendar."""
 
     def __init__(self):
         self._filter_source: str | None = None
 
     async def async_step_init(self, user_input=None):
-        if self.config_entry.data.get(CONF_ENTRY_TYPE, ENTRY_TYPE_MERGE) == ENTRY_TYPE_ACTIVITY:
-            return await self.async_step_edit_activity_sensor()
         return self.async_show_menu(
             step_id="init", menu_options=["edit_sources", "edit_filters", "edit_appearance"]
         )
-
-    # ---- Merged calendar options ----
 
     async def async_step_edit_sources(self, user_input=None):
         if user_input is not None:
@@ -233,36 +153,4 @@ class CalendarMergeOptionsFlow(config_entries.OptionsFlow):
             step_id="filter_rules",
             data_schema=schema,
             description_placeholders={"entity_id": entity_id},
-        )
-
-    # ---- Activity sensor options ----
-
-    async def async_step_edit_activity_sensor(self, user_input=None):
-        errors: dict[str, str] = {}
-        current = self.config_entry.data
-
-        if user_input is not None:
-            if not user_input[CONF_SOURCES]:
-                errors["sources"] = "no_sources"
-            elif not (user_input.get("create_binary_sensor") or user_input.get("create_sensor")):
-                errors["create_binary_sensor"] = "no_sensor_type"
-            else:
-                new_data = dict(current)
-                new_data[CONF_NAME] = user_input[CONF_NAME]
-                new_data[CONF_SOURCES] = user_input[CONF_SOURCES]
-                new_data[CONF_ICON] = user_input.get(CONF_ICON)
-                new_data[CONF_PICTURE] = user_input.get(CONF_PICTURE)
-                new_data[CONF_FILTER] = _build_filter_from_flat_input(user_input)
-                new_data[CONF_TRIGGER_MODE] = user_input.get(CONF_TRIGGER_MODE, TRIGGER_MODE_ACTIVE)
-                new_data[CONF_CREATE_BINARY] = user_input["create_binary_sensor"]
-                new_data[CONF_CREATE_SENSOR] = user_input["create_sensor"]
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry, data=new_data, title=user_input[CONF_NAME]
-                )
-                return self.async_create_entry(title="", data={})
-
-        return self.async_show_form(
-            step_id="edit_activity_sensor",
-            data_schema=_activity_sensor_schema(current),
-            errors=errors,
         )
