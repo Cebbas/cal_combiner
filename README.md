@@ -7,15 +7,22 @@ redan syns som `calendar.*` i HA) till EN kalender som:
 - går att prenumerera på från valfri kalenderapp (Google Kalender, Apple
   Kalender, Outlook m.fl.) via en hemlig ICS-länk ("Lägg till kalender via URL") –
   read-only
-- går att redigera direkt i kalenderappen via ett riktigt CalDAV-konto (Apple
-  Kalender, Thunderbird, DAVx5 på Android – se avsnitt 6; Google Kalender saknar
-  stöd för externa CalDAV-konton och förblir read-only oavsett)
+- går att redigera direkt i kalenderappen via ETT delat CalDAV-konto för hela
+  installationen (Apple Kalender, Thunderbird, DAVx5 på Android – se
+  avsnitt 6; Google Kalender saknar stöd för externa CalDAV-konton och
+  förblir read-only oavsett)
 - automatiskt skapar sin egen skrivbara kalender som nya event hamnar i som
   standard – du behöver inte skapa eller peka ut någon kalender själv
 - stödjer återkommande event (upprepning), inklusive att redigera/ta bort ett
   enstaka tillfälle i en serie
-- låter dig sätta egen ikon och bild, både för kalendrar och för
-  aktivitetssensorer
+- låter dig sätta egen ikon och bild
+
+Letar du efter aktivitetssensorer (`binary_sensor`/`sensor` byggda från
+filtrerad kalenderaktivitet, t.ex. "är ett Zoo-event på gång just nu")? Det
+är numera en egen, fristående integration:
+[Cal Activity Sensors](https://github.com/Cebbas/cal_activity_sensors) – den
+pratar bara med vanliga `calendar.*`-entiteter och behöver inte Cal Combiner
+installerat.
 
 ## 1. Installation
 
@@ -33,18 +40,16 @@ redan syns som `calendar.*` i HA) till EN kalender som:
 ## 2. Konfigurera Cal Combiner
 
 Inställningar → Enheter & tjänster → Lägg till integration → **Cal Combiner**
-→ **Sammanslagen kalender**
 
 - **Namn**: namnet på den sammanslagna kalendern
 - **Extra källkalendrar**: valfritt vid skapandet – du kan lägga till fler
   `calendar.*`-entiteter senare i sidopanelen
 - **Ikon/bild**: valfritt, går även att ändra senare
 
-Det finns inget "skrivmål" att välja längre och ingen separat kalenderentitet
-att hålla reda på: den sammanslagna kalendern *är* skrivmålet. Nya event du
-lägger till (i panelen, i HA:s kalendervy eller via `calendar.create_event`)
-sparas direkt på den, sida vid sida med de sammanslagna eventen från dina
-källkalendrar.
+Det finns inget "skrivmål" att välja och ingen separat kalenderentitet att
+hålla reda på: den sammanslagna kalendern *är* skrivmålet. Nya event du
+lägger till (i panelen, i HA:s kalendervy eller via CalDAV) sparas direkt på
+den, sida vid sida med de sammanslagna eventen från dina källkalendrar.
 
 Vill du slå ihop en extern iCal-URL (t.ex. en skolkalender)? Lägg till den
 först som en egen källa via Inställningar → Enheter & tjänster → Lägg till
@@ -65,57 +70,40 @@ Efter installation dyker **Cal Combiner** upp som en egen flik i sidomenyn
 
 **Kalendrar**
 - Se alla dina sammanslagna kalendrar som kort, med ikon och valfri bild
-- Lägg till/ta bort källkalendrar via en rullgardin (inte längre en lång
-  lista med kryssrutor) – välj en kalender och klicka "Lägg till"
+- Lägg till/ta bort källkalendrar via en rullgardin (inte en lång lista med
+  kryssrutor) – välj en kalender och klicka "Lägg till"
 - Sätt/ta bort filter per källa (inkludera/uteslut ord, regex, skiftläge)
 - Skapa helt nya sammanslagna kalendrar utan att behöva peka ut något
   skrivmål – det skapas automatiskt
 - Kopiera ICS-prenumerationslänken (både https och webcal) direkt
+- Se en logg över senaste ändringarna direkt på kortet
 
-**Sensorer**
-- Bygg **aktivitetssensorer** (se avsnitt 4) med samma sorts filter, ikon och
-  bild
-- Välj om `binary_sensor`:n ska vara "på" när ett event pågår just nu, eller
-  när ett matchande event inträffar någon gång samma dag
+**Server**
+- Kontouppgifterna för det delade CalDAV-kontot (avsnitt 6): server-URL,
+  användarnamn och lösenord, färdiga att kopiera in i kalenderappen
+- Kryssa i vilka sammanslagna kalendrar som ska exponeras via CalDAV-kontot
+  – nya kalendrar kryssas i automatiskt när de skapas, du kan kryssa ur dem
+  här om du inte vill dela en viss kalender
 
 Panelen pratar med backend via ett eget websocket-API (`cal_combiner/...`)
 och kräver inte att du går igenom den vanliga inställningsdialogen, men den
 gamla vägen (Inställningar → Enheter & tjänster → Konfigurera) fungerar
-fortfarande parallellt för både kalendrar och aktivitetssensorer.
+fortfarande parallellt.
 
-## 4. Aktivitetssensorer
-
-Utöver sammanslagna kalendrar kan du bygga fristående sensorer som filtrerar
-fram en viss sorts aktivitet ur en eller flera källkalendrar – med exakt
-samma filtertyp som används för kalenderfiltren (fält att matcha mot,
-inkludera/uteslut ord, regex, skiftläge), samt egen ikon och bild.
-
-Varje aktivitetssensor kan skapa:
-
-- **`binary_sensor`**: `on` beroende på vilket läge du valt –
-  antingen "ett event pågår just nu" eller "ett event inträffar någon gång
-  idag" – med attribut `current_event`, `next_event`, `next_start`,
-  `failed_sources`
-- **`sensor`**: state = titeln på pågående (eller näst kommande) matchande
-  event, attribut `matches_today`, `next_start`, `next_end`, `location`,
-  `failed_sources`
-
-Exempel: en sensor med källa = din Google-kalender och filter
-"inkludera: Zoo" ger en `binary_sensor.zoo_besok` som är `on` när ett
-Zoo-event pågår (eller hela dagen zoo-eventet finns, om du valt det läget),
-perfekt att trigga automationer på (t.ex. stäng av larmet, sätt på
-"borta"-läge, eller skicka en påminnelse).
-
-Skapa/redigera/ta bort dem enklast via sidopanelen (avsnitt 3), eller via
-Inställningar → Enheter & tjänster → Lägg till integration → Cal Combiner →
-Aktivitetssensor.
-
-## 5. Redigera och ta bort event
+## 4. Redigera och ta bort event
 
 Du kan redigera och ta bort event direkt från den sammanslagna kalendern
 (t.ex. via HA:s kalendervy) – event som kommer från en källkalender skickas
 automatiskt vidare dit, medan event du skapat direkt på den sammanslagna
-kalendern uppdateras/tas bort på plats.
+kalendern uppdateras/tas bort på plats. Om källkalendern inte stödjer
+redigering/borttagning (många read-only källor, t.ex. de flesta
+prenumerationskalendrar) får du ett tydligt felmeddelande istället för att
+det bara misslyckas tyst.
+
+## 5. (reserverat)
+
+*(Numret är avsiktligt ledigt – se historiken i `CHANGELOG.md` om du undrar
+varför.)*
 
 ## 6. Redigera direkt i kalenderappen (CalDAV)
 
@@ -123,8 +111,14 @@ Prenumerationslänken i avsnitt 2 (webcal/ICS) är alltid **read-only** – det
 är en fil kalenderappen bara läser med jämna mellanrum, det finns ingen väg
 tillbaka för ändringar. För att kunna skapa, redigera och ta bort event
 **direkt i kalenderappen** och få det synkat till Cal Combiner behövs ett
-riktigt CalDAV-konto istället, vilket panelen också ger dig (samma kort som
-prenumerationslänken, under "Redigera direkt i kalenderappen").
+riktigt CalDAV-konto istället.
+
+Till skillnad från prenumerationslänken (en per sammanslagen kalender) finns
+det bara **ETT CalDAV-konto för hela Cal Combiner-installationen** – du
+lägger till det en gång i kalenderappen, och varje sammanslagen kalender du
+kryssat i under fliken **Server** i panelen dyker upp som en egen kalender
+i appen, precis som ett vanligt Google- eller iCloud-konto med flera
+kalendrar.
 
 **Vilka appar stödjer detta?**
 
@@ -137,10 +131,10 @@ prenumerationslänken, under "Redigera direkt i kalenderappen").
 | Google Kalender (webb, iOS, Android) | **Nej** – Google har ingen funktion för att lägga till ett externt CalDAV-konto i någon av sina appar. Det är en begränsning i Google Kalender, inte något som går att lösa härifrån. Använd prenumerationslänken (read-only) eller redigera via HA:s egen kalendervy istället |
 | Outlook | Nej som standard (kräver tredjeparts-tillägg) |
 
-**Kontouppgifter** (från panelen, per sammanslagen kalender):
+**Kontouppgifter** (fliken Server i panelen):
 - **Server-URL**
 - **Användarnamn**: valfritt värde, kontrolleras inte
-- **Lösenord**: samma hemliga token som prenumerationslänken använder
+- **Lösenord**: en hemlig, delad token – samma för alla kalendrar i kontot
 
 Precis som prenumerationslänken kräver detta att en "Home Assistant-URL" är
 konfigurerad (Inställningar → System → Nätverk), och att den är nåbar från
@@ -179,13 +173,16 @@ Integrationen har inget "endast en instans"-krav – lägg till **Cal Combiner**
 flera gånger (Inställningar → Enheter & tjänster → Lägg till integration →
 Cal Combiner) för att bygga t.ex. en "Familj"-kalender och en separat
 "Jobb"-kalender, var och en med sin egen skrivbara kalender, egna källor,
-filter, ikon/bild och ICS-länk.
+filter, ikon/bild och ICS-länk. Alla dyker upp som separata kalendrar i
+samma delade CalDAV-konto (avsnitt 6), en per instans du kryssar i under
+Server-fliken.
 
 ## 9. Om en källa inte svarar
 
 Om en källkalender inte går att nå (t.ex. utgången Google-token) exkluderas
 den tillfälligt och du får en notis i HA om vilken källa det gäller. Notisen
-försvinner automatiskt igen så fort källan svarar normalt.
+försvinner automatiskt igen så fort källan svarar normalt. Det syns även i
+kalenderns "Senaste händelser"-logg i panelen.
 
 ## 10. Bygga vidare
 
@@ -200,15 +197,12 @@ custom_components/
     __init__.py       # setup, ICS-länk-notis, registrerar panel + ws-api + CalDAV
     calendar.py         # sammanslagen kalender-entitet + delad filter-/routningslogik
     own_calendar.py        # lagring (inkl. upprepning) för event varje sammanslagen kalender äger direkt
-    caldav.py                # minimal CalDAV-server (PROPFIND/REPORT/GET/PUT/DELETE) för tvåvägssync
-    activity.py               # delad coordinator + tidshjälpfunktioner för aktivitetssensorer
-    activity_log.py             # liten rullande händelselogg per kalender/sensor, visas i panelen
-    binary_sensor.py               # aktivitetssensor: på/av (nu eller idag)
-    sensor.py                        # aktivitetssensor: aktuellt/nästa event
-    config_flow.py                     # UI för att lägga till/ändra (meny: kalender/sensor)
-    http.py                              # /api/cal_combiner/... ICS-feed
-    panel.py                               # registrerar sidopanelen + statiska filer
-    ws_api.py                                # websocket-kommandon som panelen använder
+    caldav.py                # delat CalDAV-konto (PROPFIND/REPORT/GET/PUT/DELETE), en server, flera kalendrar
+    activity_log.py             # liten rullande händelselogg per kalender, visas i panelen
+    config_flow.py                # UI för att lägga till/ändra en sammanslagen kalender
+    http.py                         # /api/cal_combiner/... ICS-feed
+    panel.py                          # registrerar sidopanelen + statiska filer
+    ws_api.py                           # websocket-kommandon som panelen använder
     const.py
     manifest.json
     hacs.json
@@ -217,5 +211,5 @@ custom_components/
       en.json
       sv.json
     www/
-      cal-combiner-panel.js  # sidopanelens UI (vanilla JS, två flikar: kalendrar/sensorer)
+      cal-combiner-panel.js  # sidopanelens UI (vanilla JS, två flikar: kalendrar/server)
 ```

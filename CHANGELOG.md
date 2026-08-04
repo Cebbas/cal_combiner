@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.8 – 2026-08-04
+- Städat: dokumentationen (README/IDEAS) synkad med 0.0.7:s omskrivning, och mappen `cal_activity_sensors/` flyttad ut ur det här repot till sitt eget.
+
+## 0.0.7 – 2026-08-04
+- Ändrat: aktivitetssensorerna (`binary_sensor`/`sensor`) är utbrutna till en egen, fristående integration – [Cal Activity Sensors](https://github.com/Cebbas/cal_activity_sensors). Cal Combiner har inget "entry type"-begrepp längre.
+- Ändrat: CalDAV är ombyggt från en server per sammanslagen kalender till EN delad server för hela installationen, med en kalender-collection per sammanslagen kalender du kryssar i. Ny flik "Server" i panelen ersätter kontokortet som tidigare satt på varje kalenderkort. Nya kalendrar kryssas i automatiskt.
+- Fix: redigering/borttagning (via CalDAV eller HA:s egen kalendervy) av ett event från en källkalender som inte stödjer uppdatering/borttagning kraschade okontrollerat istället för att ge ett tydligt felmeddelande.
+- Fix: ICS-feed-tokenjämförelsen använder nu konstant-tidsjämförelse (`hmac.compare_digest`).
+
 ## 0.0.6 – 2026-08-03
 - Ny: riktig tvåvägssync via ett CalDAV-konto (server-URL/användarnamn/lösenord i panelen) – skapa, redigera och ta bort event direkt i Apple Kalender, Thunderbird eller Android+DAVx5. Google Kalender saknar stöd för externa CalDAV-konton i alla sina appar och förblir read-only via den befintliga ICS-prenumerationen.
 - Ny: återkommande event (upprepning) stöds nu på den egna kalendern – skapa via HA:s kalendervy, panelen eller CalDAV; redigera/ta bort en hel serie eller bara ett enstaka tillfälle.
