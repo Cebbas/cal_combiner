@@ -622,6 +622,22 @@ async def handle_delete(request: web.Request) -> web.Response:
     return web.Response(status=404)
 
 
+def _logged(handler):
+    """Wrap a handler to log every incoming CalDAV request at info level.
+
+    Requests never reaching this point (blocked upstream, e.g. by a remote
+    proxy stripping WebDAV methods) won't show here either - that absence is
+    itself the diagnostic signal.
+    """
+
+    async def wrapper(request: web.Request) -> web.Response:
+        response = await handler(request)
+        _LOGGER.info("CalDAV %s %s -> %s", request.method, request.path, response.status)
+        return response
+
+    return wrapper
+
+
 def async_register_caldav(hass: HomeAssistant) -> None:
     """Register the CalDAV routes directly on the aiohttp router.
 
@@ -646,13 +662,13 @@ def async_register_caldav(hass: HomeAssistant) -> None:
     # aiohttp treats ".../dav" and ".../dav/" as distinct routes with no
     # automatic normalization.
     for base in (BASE_PATH, f"{BASE_PATH}/"):
-        router.add_route("OPTIONS", base, handle_root_options)
-        router.add_route("PROPFIND", base, handle_root_propfind)
+        router.add_route("OPTIONS", base, _logged(handle_root_options))
+        router.add_route("PROPFIND", base, _logged(handle_root_propfind))
     for base in (COLLECTION_PATH, f"{COLLECTION_PATH}/"):
-        router.add_route("OPTIONS", base, handle_options)
-        router.add_route("PROPFIND", base, handle_propfind)
-        router.add_route("REPORT", base, handle_report)
-    router.add_route("OPTIONS", OBJECT_PATH, handle_options)
-    router.add_route("GET", OBJECT_PATH, handle_get)
-    router.add_route("PUT", OBJECT_PATH, handle_put)
-    router.add_route("DELETE", OBJECT_PATH, handle_delete)
+        router.add_route("OPTIONS", base, _logged(handle_options))
+        router.add_route("PROPFIND", base, _logged(handle_propfind))
+        router.add_route("REPORT", base, _logged(handle_report))
+    router.add_route("OPTIONS", OBJECT_PATH, _logged(handle_options))
+    router.add_route("GET", OBJECT_PATH, _logged(handle_get))
+    router.add_route("PUT", OBJECT_PATH, _logged(handle_put))
+    router.add_route("DELETE", OBJECT_PATH, _logged(handle_delete))
