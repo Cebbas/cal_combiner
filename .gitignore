@@ -13,3 +13,5 @@ venv/
 *.mp4
 .idea/
 .vscode/
+
+debug/

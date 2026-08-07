@@ -25,6 +25,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
+
+    if CONF_TOKEN not in entry.data:
+        # Pre-0.0.7 "activity sensor" entries never got a token (only merged
+        # calendars did) and that entry type no longer exists here - it moved
+        # to the standalone Cal Activity Sensors integration. Setting one of
+        # these up as a merge calendar would crash (no token) or misbehave
+        # (different data shape), so remove it instead.
+        hass.async_create_task(_async_remove_legacy_activity_entry(hass, entry))
+        return False
+
     hass.data[DOMAIN][entry.entry_id] = {"entry": entry}
 
     await async_setup_feed_view(hass)
@@ -35,6 +45,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
+
+
+async def _async_remove_legacy_activity_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    name = entry.data.get(CONF_NAME, entry.title)
+    await hass.config_entries.async_remove(entry.entry_id)
+    persistent_notification.async_create(
+        hass,
+        (
+            f'Aktivitetssensorn "{name}" byggde på en funktion som tagits bort ur Cal '
+            "Combiner och har därför tagits bort automatiskt. Motsvarande funktionalitet "
+            'finns numera i den fristående integrationen "Cal Activity Sensors" – '
+            "installera den separat om du vill ha kvar sensorn."
+        ),
+        title="Cal Combiner: gammal aktivitetssensor borttagen",
+        notification_id=f"cal_combiner_legacy_removed_{entry.entry_id}",
+    )
 
 
 def _notify_feed_url(hass: HomeAssistant, entry: ConfigEntry) -> None:
