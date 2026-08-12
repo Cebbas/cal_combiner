@@ -175,10 +175,14 @@ I panelen (fliken Kalendrar → klicka på en källa under "Filter per källa")
 kan du även lägga till en eller flera **namnbytesregler** för samma källa,
 längst ner i samma ruta som filtret. Varje regel har ett fält-val (titel,
 beskrivning eller plats – titel är standard), ett regex-mönster och vad det
-ska ersättas med. Reglerna körs i den ordning du lagt till dem, per fält,
-efter filtreringen, innan eventet visas (kalendervy, ICS-prenumeration och
-CalDAV får alla samma namn). Ett ogiltigt regex-mönster stoppas direkt när
-du sparar, med ett felmeddelande i panelen – det sparas aldrig tyst trasigt.
+ska ersättas med. Reglerna körs i den ordning de listas, uppifrån och ner,
+per fält, efter filtreringen, innan eventet visas (kalendervy,
+ICS-prenumeration och CalDAV får alla samma namn). Använd ↑/↓ på en rad för
+att flytta den regeln – **ordningen spelar roll**: en regel som `^Träning$`
+eller `\([^)]*\)$` är ankrad (`^`/`$`) och matchar bara om en tidigare regel
+redan städat bort resten av strängen (se exemplet nedan). Ett ogiltigt
+regex-mönster stoppas direkt när du sparar, med ett felmeddelande i panelen
+– det sparas aldrig tyst trasigt.
 
 Klicka **Förhandsgranska** för att se vad filtret/namnbytet du håller på att
 skriva faktiskt skulle göra mot källans riktiga kommande event (upp till 60
@@ -195,9 +199,15 @@ regex-grupp behövs):
 2. Mönster ` \([^)]*\)$`, ersätt med *(tomt)* – stryker en avslutande
    parentes, t.ex. "(Div 3 Nordöstra Götaland, herr 2026)"
 
-Det ger `Träning` respektive `Match: BK Ljungsbro - IFK Västervik`. Vill du
-dessutom byta ut just "Träning" mot något annat, lägg till en tredje regel
-med mönster `^Träning$` och ersätt med t.ex. `Fotbolls Träning`.
+Det ger `Träning` respektive `Match: BK Ljungsbro - IFK Västervik` – **men
+bara i den ordningen**: regel 2 (parentesen) kräver att strängen slutar med
+`)`, vilket bara stämmer efter att regel 1 redan strippat `// Lagnamn`. Vill
+du dessutom byta ut just "Träning" mot något annat, lägg till en **tredje**
+regel, sist i listan, med mönster `^Träning$` och ersätt med t.ex. `Fotbolls
+Träning` – den kräver på samma sätt att regel 1 redan kört, annars matchar
+den aldrig (strängen är då fortfarande `Träning // Herrsenior - ...`, inte
+`Träning`). Råkar du lägga till dem i fel ordning, flytta dem med ↑/↓
+istället för att radera och börja om.
 
 Det vanliga config-flowet (Inställningar → Enheter & tjänster → Konfigurera)
 har bara filter, inte namnbyte – namnbyte finns än så länge bara i panelen.

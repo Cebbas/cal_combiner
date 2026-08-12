@@ -2,6 +2,9 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.13 – 2026-08-07
+- Ny: namnbytesregler går att flytta upp/ner (↑/↓, numrerade rader) i panelen – ankrade regler (`^...$`) är ordningsberoende och innan detta gick fel ordning bara att fixa genom att radera och lägga till på nytt.
+
 ## 0.0.12 – 2026-08-07
 - Ny: namnbytesregler kan nu rikta titel, beskrivning eller plats (tidigare bara titeln).
 - Ny: Förhandsgranska-knapp för filter/namnbyte – visar vad ett osparat filter/namnbyte faktiskt gör mot källans riktiga kommande event (60 dagar framåt) innan man sparar.

@@ -17,6 +17,7 @@
 - [x] Regex-läge (mönster istället för ren textmatchning)
 - [x] Byt namn på event per källa: en ordnad lista regex-ersättningsregler (`re.sub`-semantik, `\1` osv för matchade grupper) som körs efter filtreringen, innan eventet visas/exponeras (kalendervy, ICS-feed, CalDAV). Löser t.ex. att en importerad lagkalender alltid lägger till " // Lagnamn" på slutet, eller att "Träning" ska heta "Fotbolls Träning".
 - [x] Varje namnbytesregel har ett eget fält-val (titel/beskrivning/plats) istället för att bara kunna byta titeln – en källa som proppar skräp i beskrivningen kan städas med samma regelmotor.
+- [x] Namnbytesregler går att flytta upp/ner i panelen (↑/↓ per rad, numrerade) – viktigt eftersom regler som `^Träning$` eller `\([^)]*\)$` är ankrade och bara matchar efter att en tidigare regel städat bort resten av strängen; innan detta gick fel ordning bara att fixa genom att radera och lägga till reglerna på nytt.
 - [x] Regex-mönster (filter och namnbyte) valideras server-side vid spara (`re.compile`) – ett trasigt mönster gav tidigare bara en tyst varning i HA:s log, nu ett synligt felmeddelande i panelen istället för att sparas som att det fungerade.
 - [x] Förhandsgranska-knapp: visar vad ett inte-ännu-sparat filter/namnbyte skulle göra mot källans riktiga kommande event (60 dagar framåt, upp till 15 träffar, "före → efter" per event) innan man sparar.
 

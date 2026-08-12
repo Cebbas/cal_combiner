@@ -533,6 +533,12 @@ class CalCombinerPanel extends HTMLElement {
       state.rules.forEach((rule, idx) => {
         const row = document.createElement("div");
         row.className = "cc-row";
+        const orderLabel = document.createElement("span");
+        orderLabel.textContent = `${idx + 1}.`;
+        orderLabel.title = "Regler körs i den här ordningen, uppifrån och ner";
+        orderLabel.style.fontSize = "13px";
+        orderLabel.style.color = "var(--secondary-text-color)";
+        orderLabel.style.minWidth = "16px";
         const fieldSelect = document.createElement("select");
         [
           { value: "summary", label: "Titel" },
@@ -556,6 +562,28 @@ class CalCombinerPanel extends HTMLElement {
         replacementInput.placeholder = "Ersätt med (t.ex. Fotbolls Träning)";
         replacementInput.value = rule.replacement;
         replacementInput.oninput = () => (rule.replacement = replacementInput.value);
+        const moveUpBtn = document.createElement("button");
+        moveUpBtn.type = "button";
+        moveUpBtn.className = "secondary";
+        moveUpBtn.textContent = "↑";
+        moveUpBtn.title = "Flytta upp";
+        moveUpBtn.style.padding = "4px 8px";
+        moveUpBtn.disabled = idx === 0;
+        moveUpBtn.onclick = () => {
+          [state.rules[idx - 1], state.rules[idx]] = [state.rules[idx], state.rules[idx - 1]];
+          renderRows();
+        };
+        const moveDownBtn = document.createElement("button");
+        moveDownBtn.type = "button";
+        moveDownBtn.className = "secondary";
+        moveDownBtn.textContent = "↓";
+        moveDownBtn.title = "Flytta ner";
+        moveDownBtn.style.padding = "4px 8px";
+        moveDownBtn.disabled = idx === state.rules.length - 1;
+        moveDownBtn.onclick = () => {
+          [state.rules[idx + 1], state.rules[idx]] = [state.rules[idx], state.rules[idx + 1]];
+          renderRows();
+        };
         const rm = document.createElement("button");
         rm.type = "button";
         rm.className = "cc-chip-remove";
@@ -565,9 +593,12 @@ class CalCombinerPanel extends HTMLElement {
           state.rules.splice(idx, 1);
           renderRows();
         };
+        row.appendChild(orderLabel);
         row.appendChild(fieldSelect);
         row.appendChild(patternInput);
         row.appendChild(replacementInput);
+        row.appendChild(moveUpBtn);
+        row.appendChild(moveDownBtn);
         row.appendChild(rm);
         rowsWrap.appendChild(row);
       });
