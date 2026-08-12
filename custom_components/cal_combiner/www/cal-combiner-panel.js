@@ -510,7 +510,13 @@ class CalCombinerPanel extends HTMLElement {
   }
 
   _buildRenameRulesControls(rules) {
-    const state = { rules: (rules || []).map((r) => ({ pattern: r.pattern || "", replacement: r.replacement || "" })) };
+    const state = {
+      rules: (rules || []).map((r) => ({
+        pattern: r.pattern || "",
+        replacement: r.replacement || "",
+        field: r.field || "summary",
+      })),
+    };
     const wrap = document.createElement("div");
 
     const rowsWrap = document.createElement("div");
@@ -527,6 +533,19 @@ class CalCombinerPanel extends HTMLElement {
       state.rules.forEach((rule, idx) => {
         const row = document.createElement("div");
         row.className = "cc-row";
+        const fieldSelect = document.createElement("select");
+        [
+          { value: "summary", label: "Titel" },
+          { value: "description", label: "Beskrivning" },
+          { value: "location", label: "Plats" },
+        ].forEach(({ value, label }) => {
+          const opt = document.createElement("option");
+          opt.value = value;
+          opt.textContent = label;
+          if (rule.field === value) opt.selected = true;
+          fieldSelect.appendChild(opt);
+        });
+        fieldSelect.onchange = () => (rule.field = fieldSelect.value);
         const patternInput = document.createElement("input");
         patternInput.type = "text";
         patternInput.placeholder = "Regex att matcha (t.ex. ^Träning // .*$)";
@@ -546,6 +565,7 @@ class CalCombinerPanel extends HTMLElement {
           state.rules.splice(idx, 1);
           renderRows();
         };
+        row.appendChild(fieldSelect);
         row.appendChild(patternInput);
         row.appendChild(replacementInput);
         row.appendChild(rm);
@@ -559,7 +579,7 @@ class CalCombinerPanel extends HTMLElement {
     addBtn.className = "secondary";
     addBtn.textContent = "+ Lägg till namnbytesregel";
     addBtn.onclick = () => {
-      state.rules.push({ pattern: "", replacement: "" });
+      state.rules.push({ pattern: "", replacement: "", field: "summary" });
       renderRows();
     };
     wrap.appendChild(addBtn);
@@ -569,7 +589,7 @@ class CalCombinerPanel extends HTMLElement {
       getValues: () =>
         state.rules
           .filter((r) => r.pattern.trim())
-          .map((r) => ({ pattern: r.pattern.trim(), replacement: r.replacement })),
+          .map((r) => ({ pattern: r.pattern.trim(), replacement: r.replacement, field: r.field })),
     };
   }
 
@@ -697,57 +717,125 @@ class CalCombinerPanel extends HTMLElement {
     const renameControls = this._buildRenameRulesControls(renameRules);
     filterControls.element.appendChild(renameControls.element);
 
+    const errorBox = document.createElement("div");
+    errorBox.className = "cc-error";
+    filterControls.element.appendChild(errorBox);
+
+    const getFilterFromControls = () => {
+      const values = filterControls.getValues();
+      const include = values.include.split(",").map((s) => s.trim()).filter(Boolean);
+      const exclude = values.exclude.split(",").map((s) => s.trim()).filter(Boolean);
+      return include.length || exclude.length
+        ? { field: values.field, include, exclude, use_regex: values.use_regex, case_sensitive: values.case_sensitive }
+        : null;
+    };
+
     const actions = document.createElement("div");
     actions.className = "cc-actions";
 
     const saveBtn = document.createElement("button");
     saveBtn.textContent = "Spara filter och namnbyte";
     saveBtn.onclick = async () => {
-      const values = filterControls.getValues();
-      const include = values.include.split(",").map((s) => s.trim()).filter(Boolean);
-      const exclude = values.exclude.split(",").map((s) => s.trim()).filter(Boolean);
-      const filter =
-        include.length || exclude.length
-          ? { field: values.field, include, exclude, use_regex: values.use_regex, case_sensitive: values.case_sensitive }
-          : null;
-      await this._hass.callWS({
-        type: "cal_combiner/update_filter",
-        entry_id: entry.entry_id,
-        source_entity_id: sourceEntityId,
-        filter,
-      });
-      await this._hass.callWS({
-        type: "cal_combiner/update_rename",
-        entry_id: entry.entry_id,
-        source_entity_id: sourceEntityId,
-        rules: renameControls.getValues(),
-      });
-      this._openFilters[key] = true;
-      await this._reload();
+      errorBox.textContent = "";
+      try {
+        await this._hass.callWS({
+          type: "cal_combiner/update_filter",
+          entry_id: entry.entry_id,
+          source_entity_id: sourceEntityId,
+          filter: getFilterFromControls(),
+        });
+        await this._hass.callWS({
+          type: "cal_combiner/update_rename",
+          entry_id: entry.entry_id,
+          source_entity_id: sourceEntityId,
+          rules: renameControls.getValues(),
+        });
+        this._openFilters[key] = true;
+        await this._reload();
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte spara ändringarna";
+      }
     };
 
     const clearBtn = document.createElement("button");
     clearBtn.className = "secondary";
     clearBtn.textContent = "Ta bort filter och namnbyte";
     clearBtn.onclick = async () => {
-      await this._hass.callWS({
-        type: "cal_combiner/update_filter",
-        entry_id: entry.entry_id,
-        source_entity_id: sourceEntityId,
-        filter: null,
-      });
-      await this._hass.callWS({
-        type: "cal_combiner/update_rename",
-        entry_id: entry.entry_id,
-        source_entity_id: sourceEntityId,
-        rules: [],
-      });
-      await this._reload();
+      errorBox.textContent = "";
+      try {
+        await this._hass.callWS({
+          type: "cal_combiner/update_filter",
+          entry_id: entry.entry_id,
+          source_entity_id: sourceEntityId,
+          filter: null,
+        });
+        await this._hass.callWS({
+          type: "cal_combiner/update_rename",
+          entry_id: entry.entry_id,
+          source_entity_id: sourceEntityId,
+          rules: [],
+        });
+        await this._reload();
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte ta bort";
+      }
+    };
+
+    const previewBox = document.createElement("div");
+    previewBox.className = "cc-log-list";
+    previewBox.style.marginTop = "8px";
+
+    const previewBtn = document.createElement("button");
+    previewBtn.type = "button";
+    previewBtn.className = "secondary";
+    previewBtn.textContent = "Förhandsgranska";
+    previewBtn.onclick = async () => {
+      errorBox.textContent = "";
+      previewBox.textContent = "Laddar…";
+      try {
+        const resp = await this._hass.callWS({
+          type: "cal_combiner/preview_source",
+          source_entity_id: sourceEntityId,
+          filter: getFilterFromControls(),
+          rules: renameControls.getValues(),
+        });
+        previewBox.innerHTML = "";
+        if (resp.failed) {
+          const warn = document.createElement("div");
+          warn.className = "cc-warning";
+          warn.textContent = "Källan svarade inte just nu - förhandsgranskningen kan vara ofullständig.";
+          previewBox.appendChild(warn);
+        }
+        if (!resp.events.length) {
+          const empty = document.createElement("div");
+          empty.className = "cc-chip-empty";
+          empty.textContent = "Inga kommande event matchar (nästa 60 dagarna)";
+          previewBox.appendChild(empty);
+        } else {
+          resp.events.forEach((ev) => {
+            const row = document.createElement("div");
+            row.className = "cc-log-row";
+            const time = document.createElement("span");
+            time.className = "cc-log-time";
+            time.textContent = new Date(ev.start).toLocaleDateString();
+            const text = document.createElement("span");
+            text.textContent = ev.before === ev.after ? ev.after || "(tomt)" : `${ev.before} → ${ev.after || "(tomt)"}`;
+            row.appendChild(time);
+            row.appendChild(text);
+            previewBox.appendChild(row);
+          });
+        }
+      } catch (err) {
+        previewBox.innerHTML = "";
+        errorBox.textContent = err.message || "Kunde inte förhandsgranska";
+      }
     };
 
     actions.appendChild(saveBtn);
     actions.appendChild(clearBtn);
+    actions.appendChild(previewBtn);
     filterControls.element.appendChild(actions);
+    filterControls.element.appendChild(previewBox);
 
     toggle.onclick = () => {
       this._openFilters[key] = !this._openFilters[key];
@@ -838,6 +926,28 @@ class CalCombinerPanel extends HTMLElement {
       }
     };
 
+    const syncBtn = document.createElement("button");
+    syncBtn.type = "button";
+    syncBtn.className = "secondary";
+    syncBtn.textContent = "Synka nu";
+    syncBtn.title = "Hämtar alla källor direkt istället för att vänta på nästa 5-minuterspoll";
+    syncBtn.onclick = async () => {
+      errorBox.textContent = "";
+      syncBtn.disabled = true;
+      const original = syncBtn.textContent;
+      try {
+        await this._hass.callWS({ type: "cal_combiner/sync_now", entry_id: entry.entry_id });
+        syncBtn.textContent = "Synkad!";
+      } catch (err) {
+        errorBox.textContent = err.message || "Kunde inte synka";
+      } finally {
+        setTimeout(() => {
+          syncBtn.textContent = original;
+          syncBtn.disabled = false;
+        }, 1500);
+      }
+    };
+
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "danger";
     deleteBtn.textContent = "Ta bort kalender";
@@ -848,6 +958,7 @@ class CalCombinerPanel extends HTMLElement {
     };
 
     actions.appendChild(saveBtn);
+    actions.appendChild(syncBtn);
     actions.appendChild(deleteBtn);
     card.appendChild(actions);
 

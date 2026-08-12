@@ -82,26 +82,35 @@ def _matches_filter(item: dict, rule: dict | None) -> bool:
     return True
 
 
-def _apply_rename(summary: str, rules: list[dict] | None) -> str:
-    """Run a source's ordered list of regex find/replace rules over an event title.
+def _apply_rename(item: dict, rules: list[dict] | None) -> dict:
+    """Run a source's ordered list of regex find/replace rules over an event's fields.
 
-    Rules run in order, each on the previous rule's output, so a source can
-    e.g. first strip a " // Team Name" suffix a scheduling site always adds,
-    then rename what's left ("Träning" -> "Fotbolls Träning") without needing
-    capture groups at all - though \\1 etc. in the replacement work too, for
-    when a rule does need to keep part of the original text.
+    Each rule targets one field (default "summary": title/beskrivning/plats
+    are the other options) and rules run in order, each on the previous
+    rule's output for that field - so a source can e.g. first strip a
+    " // Team Name" suffix a scheduling site always adds, then rename what's
+    left ("Träning" -> "Fotbolls Träning") without needing capture groups at
+    all - though \\1 etc. in the replacement work too, for when a rule does
+    need to keep part of the original text.
     """
-    if not rules:
-        return summary
-    for rule in rules:
+    fields = {
+        "summary": item.get("summary") or "",
+        "description": item.get("description"),
+        "location": item.get("location"),
+    }
+    for rule in rules or []:
         pattern = rule.get("pattern") or ""
         if not pattern:
             continue
+        field = rule.get("field") or "summary"
+        current = fields.get(field)
+        if current is None:
+            continue
         try:
-            summary = re.sub(pattern, rule.get("replacement", ""), summary)
+            fields[field] = re.sub(pattern, rule.get("replacement", ""), current)
         except re.error as err:
             _LOGGER.warning("Ogiltigt regex-mönster för namnbyte %r: %s", pattern, err)
-    return summary
+    return fields
 
 
 def _parse_merged_uid(merged_uid: str) -> tuple[str, str] | None:
@@ -177,13 +186,14 @@ async def fetch_merged_events(
             start_val = dt_util.parse_date(item["start"]) or dt_util.parse_datetime(item["start"])
             end_val = dt_util.parse_date(item["end"]) or dt_util.parse_datetime(item["end"])
             orig_uid = item.get("uid") or item.get("summary") or ""
+            renamed = _apply_rename(item, rename_rules)
             events.append(
                 CalendarEvent(
                     start=start_val,
                     end=end_val,
-                    summary=_apply_rename(item.get("summary", ""), rename_rules),
-                    description=item.get("description"),
-                    location=item.get("location"),
+                    summary=renamed["summary"],
+                    description=renamed["description"],
+                    location=renamed["location"],
                     uid=f"{entity_id}{UID_SEPARATOR}{orig_uid}",
                 )
             )
@@ -318,6 +328,7 @@ async def async_setup_entry(
 
     coordinator = MergedCalendarCoordinator(hass, entry, store)
     await coordinator.async_config_entry_first_refresh()
+    hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
     async_add_entities([MergedCalendarEntity(coordinator, entry, store)])
 
 

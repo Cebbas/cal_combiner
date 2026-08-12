@@ -71,6 +71,10 @@ class OwnCalendarStore:
         self.events = (data or {}).get("events", [])
         self.ctag = (data or {}).get("ctag", 0)
 
+    async def async_remove(self) -> None:
+        """Delete the underlying storage file entirely (the owning entry is being deleted)."""
+        await self._store.async_remove()
+
     async def _async_save(self) -> None:
         # Bumped on every mutation so CalDAV clients can cheaply tell "did
         # anything in this collection change" without re-fetching everything.

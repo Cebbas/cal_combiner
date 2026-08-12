@@ -1,14 +1,19 @@
 """Websocket API used by the Cal Combiner sidebar panel."""
 from __future__ import annotations
 
+from datetime import timedelta
+import re
+
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.util import dt as dt_util
 
 from . import caldav
 from .activity_log import async_clear, async_get_entries, async_log
+from .calendar import fetch_merged_events
 from .const import (
     CONF_FILTERS,
     CONF_ICON,
@@ -19,6 +24,22 @@ from .const import (
     CONF_TOKEN,
     DOMAIN,
 )
+
+RENAME_RULE_SCHEMA = {
+    vol.Required("pattern"): str,
+    vol.Optional("replacement", default=""): str,
+    vol.Optional("field", default="summary"): vol.In(["summary", "description", "location"]),
+}
+
+
+def _check_regex_patterns(patterns: list[str]) -> str | None:
+    """Compile-check a batch of user-supplied regex patterns; returns an error message, if any."""
+    for pattern in patterns:
+        try:
+            re.compile(pattern)
+        except re.error as err:
+            return f"Ogiltigt regex-mönster {pattern!r}: {err}"
+    return None
 
 
 def _feed_url(hass: HomeAssistant, entry) -> str | None:
@@ -159,8 +180,14 @@ async def ws_update_filter(hass: HomeAssistant, connection, msg):
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
 
-    filters = dict(entry.data.get(CONF_FILTERS, {}))
     new_filter = msg.get("filter")
+    if new_filter and new_filter.get("use_regex"):
+        error = _check_regex_patterns((new_filter.get("include") or []) + (new_filter.get("exclude") or []))
+        if error:
+            connection.send_error(msg["id"], "invalid_regex", error)
+            return
+
+    filters = dict(entry.data.get(CONF_FILTERS, {}))
     if new_filter:
         filters[msg["source_entity_id"]] = new_filter
     else:
@@ -181,9 +208,7 @@ async def ws_update_filter(hass: HomeAssistant, connection, msg):
         vol.Required("type"): f"{DOMAIN}/update_rename",
         vol.Required("entry_id"): str,
         vol.Required("source_entity_id"): str,
-        vol.Optional("rules", default=[]): [
-            {vol.Required("pattern"): str, vol.Optional("replacement", default=""): str}
-        ],
+        vol.Optional("rules", default=[]): [RENAME_RULE_SCHEMA],
     }
 )
 @websocket_api.async_response
@@ -193,8 +218,13 @@ async def ws_update_rename(hass: HomeAssistant, connection, msg):
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
 
-    renames = dict(entry.data.get(CONF_RENAME, {}))
     rules = [r for r in msg["rules"] if r.get("pattern", "").strip()]
+    error = _check_regex_patterns([r["pattern"] for r in rules])
+    if error:
+        connection.send_error(msg["id"], "invalid_regex", error)
+        return
+
+    renames = dict(entry.data.get(CONF_RENAME, {}))
     if rules:
         renames[msg["source_entity_id"]] = rules
     else:
@@ -219,9 +249,76 @@ async def ws_delete_entry(hass: HomeAssistant, connection, msg):
     if entry is None or entry.domain != DOMAIN:
         connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
         return
+    own_store = hass.data.get(DOMAIN, {}).get(msg["entry_id"], {}).get("own_store")
     await hass.config_entries.async_remove(msg["entry_id"])
+    if own_store is not None:
+        await own_store.async_remove()
     await async_clear(hass, msg["entry_id"])
     await caldav.async_forget_entry(hass, msg["entry_id"])
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/preview_source",
+        vol.Required("source_entity_id"): str,
+        vol.Optional("filter"): vol.Any(dict, None),
+        vol.Optional("rules", default=[]): [RENAME_RULE_SCHEMA],
+    }
+)
+@websocket_api.async_response
+async def ws_preview_source(hass: HomeAssistant, connection, msg):
+    """Show what a not-yet-saved filter/rename combo would do to a source's real upcoming events."""
+    new_filter = msg.get("filter")
+    if new_filter and new_filter.get("use_regex"):
+        error = _check_regex_patterns((new_filter.get("include") or []) + (new_filter.get("exclude") or []))
+        if error:
+            connection.send_error(msg["id"], "invalid_regex", error)
+            return
+
+    rules = [r for r in msg["rules"] if r.get("pattern", "").strip()]
+    error = _check_regex_patterns([r["pattern"] for r in rules])
+    if error:
+        connection.send_error(msg["id"], "invalid_regex", error)
+        return
+
+    entity_id = msg["source_entity_id"]
+    now = dt_util.now()
+    start, end = now - timedelta(days=1), now + timedelta(days=60)
+    filters = {entity_id: new_filter} if new_filter else {}
+
+    # Fetched twice (with vs. without the rename rules) rather than diffing
+    # rename results after the fact, since that's the exact same code path
+    # (fetch_merged_events) the real merged calendar uses - no risk of the
+    # preview drifting from what saving would actually produce.
+    before_events, failed = await fetch_merged_events(hass, [entity_id], start, end, filters, {})
+    after_events, _failed = await fetch_merged_events(
+        hass, [entity_id], start, end, filters, {entity_id: rules} if rules else {}
+    )
+
+    def _fmt(value) -> str:
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+    events = [
+        {"start": _fmt(before.start), "before": before.summary, "after": after.summary}
+        for before, after in zip(before_events, after_events)
+    ]
+    connection.send_result(msg["id"], {"events": events[:15], "failed": bool(failed)})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/sync_now", vol.Required("entry_id"): str}
+)
+@websocket_api.async_response
+async def ws_sync_now(hass: HomeAssistant, connection, msg):
+    data = hass.data.get(DOMAIN, {}).get(msg["entry_id"])
+    coordinator = data.get("coordinator") if data else None
+    if coordinator is None:
+        connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
+        return
+    await coordinator.async_refresh()
     connection.send_result(msg["id"], {"ok": True})
 
 
@@ -269,6 +366,8 @@ def async_register_ws_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_update_entry)
     websocket_api.async_register_command(hass, ws_update_filter)
     websocket_api.async_register_command(hass, ws_update_rename)
+    websocket_api.async_register_command(hass, ws_preview_source)
+    websocket_api.async_register_command(hass, ws_sync_now)
     websocket_api.async_register_command(hass, ws_delete_entry)
     websocket_api.async_register_command(hass, ws_get_activity_log)
     websocket_api.async_register_command(hass, ws_get_caldav_settings)

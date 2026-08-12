@@ -15,7 +15,10 @@
 - [x] Välj vilket fält som matchas: titel / beskrivning / plats / alla
 - [x] Skiftlägeskänslig eller ej
 - [x] Regex-läge (mönster istället för ren textmatchning)
-- [x] Byt namn på event per källa: en ordnad lista regex-ersättningsregler (`re.sub`-semantik, `\1` osv för matchade grupper) som körs på titeln efter filtreringen, innan eventet visas/exponeras (kalendervy, ICS-feed, CalDAV). Löser t.ex. att en importerad lagkalender alltid lägger till " // Lagnamn" på slutet, eller att "Träning" ska heta "Fotbolls Träning".
+- [x] Byt namn på event per källa: en ordnad lista regex-ersättningsregler (`re.sub`-semantik, `\1` osv för matchade grupper) som körs efter filtreringen, innan eventet visas/exponeras (kalendervy, ICS-feed, CalDAV). Löser t.ex. att en importerad lagkalender alltid lägger till " // Lagnamn" på slutet, eller att "Träning" ska heta "Fotbolls Träning".
+- [x] Varje namnbytesregel har ett eget fält-val (titel/beskrivning/plats) istället för att bara kunna byta titeln – en källa som proppar skräp i beskrivningen kan städas med samma regelmotor.
+- [x] Regex-mönster (filter och namnbyte) valideras server-side vid spara (`re.compile`) – ett trasigt mönster gav tidigare bara en tyst varning i HA:s log, nu ett synligt felmeddelande i panelen istället för att sparas som att det fungerade.
+- [x] Förhandsgranska-knapp: visar vad ett inte-ännu-sparat filter/namnbyte skulle göra mot källans riktiga kommande event (60 dagar framåt, upp till 15 träffar, "före → efter" per event) innan man sparar.
 
 ## Redigering
 - [x] Redigera event via den sammanslagna kalendern (skickas vidare till rätt källa)
@@ -40,6 +43,7 @@
 - [x] Options-flow uppdaterat för att undvika kommande HA-deprecation (self.config_entry)
 - [x] Felindikator när en källkalender inte svarar (attribut `failed_sources` + notis vid nytt fel, notis försvinner när felet är löst)
 - [x] ICS-prenumerationslänken byggs med `homeassistant.helpers.network.get_url` (extern → intern → IP-fallback) istället för att bara läsa `external_url`/`internal_url`, så länken faktiskt fungerar när inget av dem är satt fullständigt
+- [x] Tar bort kalenderns egen `OwnCalendarStore`-fil (`.storage/cal_combiner_own_<entry_id>`) när kalendern tas bort – tidigare låg alla dess egna event kvar på disk för evigt eftersom `ws_delete_entry` bara städade aktivitetsloggen och CalDAV-inställningarna, inte den egna kalenderns lagring
 - [ ] Repair-issue (istället för bara persistent_notification) så felet syns i Inställningar → Repairs
 - [ ] Retry/backoff om en källa svarar ostabilt istället för att direkt räknas som "failed" för hela pollningsintervallet
 - [ ] Reauth-flow (`async_step_reauth`) så en källa med utgången token (t.ex. Google) kan återautentiseras direkt istället för att integrationen behöver tas bort och läggas till igen
@@ -62,6 +66,7 @@
 - [ ] Drag-och-släpp / färgkodning per källa i panelen (mer avancerad frontend, likt vacuum scheduler)
 - [x] Visa `failed_sources`-status i panelen – täcks av aktivitetsloggen (källa svarar inte/svarar igen loggas per kort)
 - [x] Aktivitetslogg per kalender ("Senaste händelser"-lista längst ner på varje kort): källa/filter tillagd/ändrad/borttagen, event skapat/uppdaterat/borttaget, källa svarar inte/svarar igen. Egen liten `Store` per entry (`activity_log.py`), rullande fönster på de 50 senaste händelserna, städas när entryn tas bort.
+- [x] "Synka nu"-knapp på varje kalenderkort som tvingar en omedelbar poll av alla källor (`coordinator.async_refresh()`) istället för att vänta upp till 5 minuter på nästa schemalagda uppdatering.
 
 ## Tester
 - [ ] Automatiserade tester (unit-tester för filterlogik, ICS-generering, create/update/delete-vidarebefordran) – idag kör CI bara hassfest/HACS-validering, ingen faktisk testsvit

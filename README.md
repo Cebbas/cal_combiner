@@ -77,6 +77,8 @@ Efter installation dyker **Cal Combiner** upp som en egen flik i sidomenyn
   skrivmål – det skapas automatiskt
 - Kopiera ICS-prenumerationslänken (både https och webcal) direkt
 - Se en logg över senaste ändringarna direkt på kortet
+- "Synka nu"-knapp som tvingar en omedelbar poll av alla källor istället för
+  att vänta upp till 5 minuter på nästa schemalagda uppdatering
 
 **Server**
 - Kontouppgifterna för det delade CalDAV-kontot (avsnitt 6): server-URL,
@@ -171,10 +173,17 @@ källkalendern – andra källor i samma sammanslagna kalender är opåverkade.
 
 I panelen (fliken Kalendrar → klicka på en källa under "Filter per källa")
 kan du även lägga till en eller flera **namnbytesregler** för samma källa,
-längst ner i samma ruta som filtret. Varje regel är ett regex-mönster +
-vad det ska ersättas med, och reglerna körs i den ordning du lagt till dem
-– på titeln, efter filtreringen, innan eventet visas (kalendervy,
-ICS-prenumeration och CalDAV får alla samma namn).
+längst ner i samma ruta som filtret. Varje regel har ett fält-val (titel,
+beskrivning eller plats – titel är standard), ett regex-mönster och vad det
+ska ersättas med. Reglerna körs i den ordning du lagt till dem, per fält,
+efter filtreringen, innan eventet visas (kalendervy, ICS-prenumeration och
+CalDAV får alla samma namn). Ett ogiltigt regex-mönster stoppas direkt när
+du sparar, med ett felmeddelande i panelen – det sparas aldrig tyst trasigt.
+
+Klicka **Förhandsgranska** för att se vad filtret/namnbytet du håller på att
+skriva faktiskt skulle göra mot källans riktiga kommande event (upp till 60
+dagar framåt), innan du sparar – praktiskt för att träffa rätt mönster utan
+att behöva spara-och-kolla-kalendervyn varje gång.
 
 Exempel: en importerad lagkalender ger titlar som `Träning // Herrsenior -
 BK Ljungsbro` och `Match: BK Ljungsbro - IFK Västervik (Div 3 Nordöstra

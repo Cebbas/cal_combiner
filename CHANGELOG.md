@@ -2,6 +2,13 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.12 – 2026-08-07
+- Ny: namnbytesregler kan nu rikta titel, beskrivning eller plats (tidigare bara titeln).
+- Ny: Förhandsgranska-knapp för filter/namnbyte – visar vad ett osparat filter/namnbyte faktiskt gör mot källans riktiga kommande event (60 dagar framåt) innan man sparar.
+- Ny: "Synka nu"-knapp på varje kalenderkort som tvingar en omedelbar poll av alla källor istället för att vänta upp till 5 minuter.
+- Fix: trasiga regex-mönster i filter eller namnbyte gav tidigare bara en tyst varning i HA:s log – valideras nu vid spara och ger ett tydligt felmeddelande i panelen.
+- Fix: tar bort kalenderns egen `OwnCalendarStore`-fil när kalendern tas bort – tidigare låg alla dess egna event kvar på disk för evigt.
+
 ## 0.0.11 – 2026-08-07
 - Ny: byt namn på event per källa – en ordnad lista regex-ersättningsregler per källkalender, redigerbar i panelen under samma ruta som filtret. Körs på titeln efter filtreringen, slår igenom i kalendervyn, ICS-prenumerationen och CalDAV.
 
