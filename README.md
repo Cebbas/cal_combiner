@@ -167,6 +167,32 @@ Du kan sätta både include och exclude samtidigt. Lämna båda tomma för att t
 bort filtret för den källan igen. Filtret gäller bara den valda
 källkalendern – andra källor i samma sammanslagna kalender är opåverkade.
 
+### Byt namn på event per källa
+
+I panelen (fliken Kalendrar → klicka på en källa under "Filter per källa")
+kan du även lägga till en eller flera **namnbytesregler** för samma källa,
+längst ner i samma ruta som filtret. Varje regel är ett regex-mönster +
+vad det ska ersättas med, och reglerna körs i den ordning du lagt till dem
+– på titeln, efter filtreringen, innan eventet visas (kalendervy,
+ICS-prenumeration och CalDAV får alla samma namn).
+
+Exempel: en importerad lagkalender ger titlar som `Träning // Herrsenior -
+BK Ljungsbro` och `Match: BK Ljungsbro - IFK Västervik (Div 3 Nordöstra
+Götaland, herr 2026) // Herrsenior - BK Ljungsbro`. Två enkla regler (ingen
+regex-grupp behövs):
+
+1. Mönster ` // .*$`, ersätt med *(tomt)* – stryker " // Lagnamn" på slutet
+   av alla event från källan
+2. Mönster ` \([^)]*\)$`, ersätt med *(tomt)* – stryker en avslutande
+   parentes, t.ex. "(Div 3 Nordöstra Götaland, herr 2026)"
+
+Det ger `Träning` respektive `Match: BK Ljungsbro - IFK Västervik`. Vill du
+dessutom byta ut just "Träning" mot något annat, lägg till en tredje regel
+med mönster `^Träning$` och ersätt med t.ex. `Fotbolls Träning`.
+
+Det vanliga config-flowet (Inställningar → Enheter & tjänster → Konfigurera)
+har bara filter, inte namnbyte – namnbyte finns än så länge bara i panelen.
+
 ## 8. Flera sammanslagna kalendrar
 
 Integrationen har inget "endast en instans"-krav – lägg till **Cal Combiner**

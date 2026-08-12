@@ -15,6 +15,7 @@
 - [x] Välj vilket fält som matchas: titel / beskrivning / plats / alla
 - [x] Skiftlägeskänslig eller ej
 - [x] Regex-läge (mönster istället för ren textmatchning)
+- [x] Byt namn på event per källa: en ordnad lista regex-ersättningsregler (`re.sub`-semantik, `\1` osv för matchade grupper) som körs på titeln efter filtreringen, innan eventet visas/exponeras (kalendervy, ICS-feed, CalDAV). Löser t.ex. att en importerad lagkalender alltid lägger till " // Lagnamn" på slutet, eller att "Träning" ska heta "Fotbolls Träning".
 
 ## Redigering
 - [x] Redigera event via den sammanslagna kalendern (skickas vidare till rätt källa)

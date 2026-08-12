@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.11 – 2026-08-07
+- Ny: byt namn på event per källa – en ordnad lista regex-ersättningsregler per källkalender, redigerbar i panelen under samma ruta som filtret. Körs på titeln efter filtreringen, slår igenom i kalendervyn, ICS-prenumerationen och CalDAV.
+
+## 0.0.10 – 2026-08-07
+- Fix: loggar nu varje inkommande CalDAV-request (metod/path/statuskod) för att kunna skilja "request kom aldrig fram" (t.ex. en fjärrproxy som stryper WebDAV-metoder) från "request kom fram men misslyckades tyst", efter en rapport om att PUT (nya event) från en iPhone aldrig nådde servern.
+
+## 0.0.9 – 2026-08-07
+- Fix: kvarvarande aktivitetssensor-entries från innan 0.0.7 (den typen finns inte längre här, bara i Cal Activity Sensors) kraschade `async_setup_entry` med `KeyError: 'token'` eftersom bara sammanslagna kalendrar någonsin fick en token. De tas nu bort automatiskt vid uppstart med en notis om varför.
+
 ## 0.0.8 – 2026-08-04
 - Städat: dokumentationen (README/IDEAS) synkad med 0.0.7:s omskrivning, och mappen `cal_activity_sensors/` flyttad ut ur det här repot till sitt eget.
 

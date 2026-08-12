@@ -6,6 +6,7 @@ CONF_SOURCES = "sources"
 CONF_NAME = "name"
 CONF_TOKEN = "token"
 CONF_FILTERS = "filters"
+CONF_RENAME = "rename"
 CONF_ICON = "icon"
 CONF_PICTURE = "picture"
 

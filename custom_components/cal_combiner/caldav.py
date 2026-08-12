@@ -66,7 +66,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .calendar import _parse_merged_uid, delete_event, fetch_merged_events, update_event
-from .const import CONF_FILTERS, CONF_NAME, CONF_SOURCES, DOMAIN
+from .const import CONF_FILTERS, CONF_NAME, CONF_RENAME, CONF_SOURCES, DOMAIN
 from .own_calendar import OwnCalendarStore, _as_datetime, _parse as parse_dt
 
 _LOGGER = logging.getLogger(__name__)
@@ -455,7 +455,12 @@ async def handle_propfind(request: web.Request) -> web.Response:
         for item in store.masters_overlapping(start, end):
             responses.append(_object_propstat_xml(_object_href(entry_id, item["uid"]), _etag_for_item(item)))
         external_events, _failed = await fetch_merged_events(
-            hass, entry.data.get(CONF_SOURCES, []), start, end, entry.data.get(CONF_FILTERS, {})
+            hass,
+            entry.data.get(CONF_SOURCES, []),
+            start,
+            end,
+            entry.data.get(CONF_FILTERS, {}),
+            entry.data.get(CONF_RENAME, {}),
         )
         for ev in external_events:
             responses.append(_object_propstat_xml(_object_href(entry_id, ev.uid), _etag_for_event(ev)))
@@ -508,7 +513,12 @@ async def handle_get(request: web.Request) -> web.Response:
     if _parse_merged_uid(uid) is not None:
         now = dt_util.now()
         external_events, _failed = await fetch_merged_events(
-            hass, entry.data.get(CONF_SOURCES, []), now - _LOOKUP_PAST, now + _LOOKUP_FUTURE, entry.data.get(CONF_FILTERS, {})
+            hass,
+            entry.data.get(CONF_SOURCES, []),
+            now - _LOOKUP_PAST,
+            now + _LOOKUP_FUTURE,
+            entry.data.get(CONF_FILTERS, {}),
+            entry.data.get(CONF_RENAME, {}),
         )
         match = next((e for e in external_events if e.uid == uid), None)
         if match is not None:

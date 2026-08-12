@@ -9,7 +9,16 @@ from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from . import caldav
 from .activity_log import async_clear, async_get_entries, async_log
-from .const import CONF_FILTERS, CONF_ICON, CONF_NAME, CONF_PICTURE, CONF_SOURCES, CONF_TOKEN, DOMAIN
+from .const import (
+    CONF_FILTERS,
+    CONF_ICON,
+    CONF_NAME,
+    CONF_PICTURE,
+    CONF_RENAME,
+    CONF_SOURCES,
+    CONF_TOKEN,
+    DOMAIN,
+)
 
 
 def _feed_url(hass: HomeAssistant, entry) -> str | None:
@@ -30,6 +39,7 @@ def _entry_to_dict(hass: HomeAssistant, entry) -> dict:
         "icon": entry.data.get(CONF_ICON),
         "picture": entry.data.get(CONF_PICTURE),
         "filters": entry.data.get(CONF_FILTERS, {}),
+        "rename": entry.data.get(CONF_RENAME, {}),
         "feed_url": feed_url,
         "feed_url_webcal": feed_url.replace("https://", "webcal://").replace("http://", "webcal://")
         if feed_url
@@ -167,6 +177,40 @@ async def ws_update_filter(hass: HomeAssistant, connection, msg):
 
 @websocket_api.require_admin
 @websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/update_rename",
+        vol.Required("entry_id"): str,
+        vol.Required("source_entity_id"): str,
+        vol.Optional("rules", default=[]): [
+            {vol.Required("pattern"): str, vol.Optional("replacement", default=""): str}
+        ],
+    }
+)
+@websocket_api.async_response
+async def ws_update_rename(hass: HomeAssistant, connection, msg):
+    entry = hass.config_entries.async_get_entry(msg["entry_id"])
+    if entry is None or entry.domain != DOMAIN:
+        connection.send_error(msg["id"], "not_found", "Hittade inte kalendern")
+        return
+
+    renames = dict(entry.data.get(CONF_RENAME, {}))
+    rules = [r for r in msg["rules"] if r.get("pattern", "").strip()]
+    if rules:
+        renames[msg["source_entity_id"]] = rules
+    else:
+        renames.pop(msg["source_entity_id"], None)
+
+    new_data = dict(entry.data)
+    new_data[CONF_RENAME] = renames
+    hass.config_entries.async_update_entry(entry, data=new_data)
+    await hass.config_entries.async_reload(entry.entry_id)
+    verb = "satt" if rules else "borttaget"
+    await async_log(hass, entry.entry_id, f"Namnbyte {verb} för {msg['source_entity_id']}")
+    connection.send_result(msg["id"], {"ok": True})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
     {vol.Required("type"): f"{DOMAIN}/delete_entry", vol.Required("entry_id"): str}
 )
 @websocket_api.async_response
@@ -224,6 +268,7 @@ def async_register_ws_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_create_entry)
     websocket_api.async_register_command(hass, ws_update_entry)
     websocket_api.async_register_command(hass, ws_update_filter)
+    websocket_api.async_register_command(hass, ws_update_rename)
     websocket_api.async_register_command(hass, ws_delete_entry)
     websocket_api.async_register_command(hass, ws_get_activity_log)
     websocket_api.async_register_command(hass, ws_get_caldav_settings)

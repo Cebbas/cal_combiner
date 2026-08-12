@@ -21,7 +21,16 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpda
 from homeassistant.util import dt as dt_util
 
 from .activity_log import async_log
-from .const import CONF_FILTERS, CONF_ICON, CONF_NAME, CONF_PICTURE, CONF_SOURCES, DEFAULT_MERGE_ICON, DOMAIN
+from .const import (
+    CONF_FILTERS,
+    CONF_ICON,
+    CONF_NAME,
+    CONF_PICTURE,
+    CONF_RENAME,
+    CONF_SOURCES,
+    DEFAULT_MERGE_ICON,
+    DOMAIN,
+)
 from .own_calendar import OwnCalendarStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,6 +82,28 @@ def _matches_filter(item: dict, rule: dict | None) -> bool:
     return True
 
 
+def _apply_rename(summary: str, rules: list[dict] | None) -> str:
+    """Run a source's ordered list of regex find/replace rules over an event title.
+
+    Rules run in order, each on the previous rule's output, so a source can
+    e.g. first strip a " // Team Name" suffix a scheduling site always adds,
+    then rename what's left ("Träning" -> "Fotbolls Träning") without needing
+    capture groups at all - though \\1 etc. in the replacement work too, for
+    when a rule does need to keep part of the original text.
+    """
+    if not rules:
+        return summary
+    for rule in rules:
+        pattern = rule.get("pattern") or ""
+        if not pattern:
+            continue
+        try:
+            summary = re.sub(pattern, rule.get("replacement", ""), summary)
+        except re.error as err:
+            _LOGGER.warning("Ogiltigt regex-mönster för namnbyte %r: %s", pattern, err)
+    return summary
+
+
 def _parse_merged_uid(merged_uid: str) -> tuple[str, str] | None:
     """Split a merged uid back into (source_entity_id, original_uid)."""
     if UID_SEPARATOR not in merged_uid:
@@ -102,13 +133,19 @@ def _get_source_entity(hass: HomeAssistant, entity_id: str):
 
 
 async def fetch_merged_events(
-    hass: HomeAssistant, sources: list[str], start, end, filters: dict | None = None
+    hass: HomeAssistant,
+    sources: list[str],
+    start,
+    end,
+    filters: dict | None = None,
+    renames: dict | None = None,
 ) -> tuple[list[CalendarEvent], list[str]]:
     """Query every source calendar entity, apply that source's filter, and merge the results.
 
     Returns (events, failed_entity_ids) so callers can surface source errors.
     """
     filters = filters or {}
+    renames = renames or {}
     events: list[CalendarEvent] = []
     failed: list[str] = []
 
@@ -131,6 +168,7 @@ async def fetch_merged_events(
             continue
 
         rule = filters.get(entity_id)
+        rename_rules = renames.get(entity_id)
         for item in response.get(entity_id, {}).get("events", []):
             if not _matches_filter(item, rule):
                 continue
@@ -143,7 +181,7 @@ async def fetch_merged_events(
                 CalendarEvent(
                     start=start_val,
                     end=end_val,
-                    summary=item.get("summary", ""),
+                    summary=_apply_rename(item.get("summary", ""), rename_rules),
                     description=item.get("description"),
                     location=item.get("location"),
                     uid=f"{entity_id}{UID_SEPARATOR}{orig_uid}",
@@ -170,7 +208,12 @@ async def fetch_all_events(
         for e in store.events_in_range(start, end)
     ]
     external_events, failed = await fetch_merged_events(
-        hass, entry.data.get(CONF_SOURCES, []), start, end, entry.data.get(CONF_FILTERS, {})
+        hass,
+        entry.data.get(CONF_SOURCES, []),
+        start,
+        end,
+        entry.data.get(CONF_FILTERS, {}),
+        entry.data.get(CONF_RENAME, {}),
     )
     events = sorted(own_events + external_events, key=lambda e: str(e.start))
     return events, failed

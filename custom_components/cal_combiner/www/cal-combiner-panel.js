@@ -509,6 +509,70 @@ class CalCombinerPanel extends HTMLElement {
     };
   }
 
+  _buildRenameRulesControls(rules) {
+    const state = { rules: (rules || []).map((r) => ({ pattern: r.pattern || "", replacement: r.replacement || "" })) };
+    const wrap = document.createElement("div");
+
+    const rowsWrap = document.createElement("div");
+    wrap.appendChild(rowsWrap);
+
+    const renderRows = () => {
+      rowsWrap.innerHTML = "";
+      if (!state.rules.length) {
+        const empty = document.createElement("div");
+        empty.className = "cc-chip-empty";
+        empty.textContent = "Inga namnbytesregler ännu";
+        rowsWrap.appendChild(empty);
+      }
+      state.rules.forEach((rule, idx) => {
+        const row = document.createElement("div");
+        row.className = "cc-row";
+        const patternInput = document.createElement("input");
+        patternInput.type = "text";
+        patternInput.placeholder = "Regex att matcha (t.ex. ^Träning // .*$)";
+        patternInput.value = rule.pattern;
+        patternInput.oninput = () => (rule.pattern = patternInput.value);
+        const replacementInput = document.createElement("input");
+        replacementInput.type = "text";
+        replacementInput.placeholder = "Ersätt med (t.ex. Fotbolls Träning)";
+        replacementInput.value = rule.replacement;
+        replacementInput.oninput = () => (rule.replacement = replacementInput.value);
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "cc-chip-remove";
+        rm.textContent = "×";
+        rm.title = "Ta bort regel";
+        rm.onclick = () => {
+          state.rules.splice(idx, 1);
+          renderRows();
+        };
+        row.appendChild(patternInput);
+        row.appendChild(replacementInput);
+        row.appendChild(rm);
+        rowsWrap.appendChild(row);
+      });
+    };
+    renderRows();
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "secondary";
+    addBtn.textContent = "+ Lägg till namnbytesregel";
+    addBtn.onclick = () => {
+      state.rules.push({ pattern: "", replacement: "" });
+      renderRows();
+    };
+    wrap.appendChild(addBtn);
+
+    return {
+      element: wrap,
+      getValues: () =>
+        state.rules
+          .filter((r) => r.pattern.trim())
+          .map((r) => ({ pattern: r.pattern.trim(), replacement: r.replacement })),
+    };
+  }
+
   _buildFeedBox(entry) {
     const box = document.createElement("div");
     if (!entry.feed_url) {
@@ -613,7 +677,11 @@ class CalCombinerPanel extends HTMLElement {
     const toggle = document.createElement("button");
     toggle.className = "cc-filter-toggle";
     const rule = (entry.filters || {})[sourceEntityId];
-    toggle.textContent = `${this._calendarName(sourceEntityId)} ${rule ? "(filter aktivt)" : "(inget filter)"}`;
+    const renameRules = (entry.rename || {})[sourceEntityId] || [];
+    const badges = [];
+    if (rule) badges.push("filter aktivt");
+    if (renameRules.length) badges.push(`${renameRules.length} namnbytesregel${renameRules.length === 1 ? "" : "er"}`);
+    toggle.textContent = `${this._calendarName(sourceEntityId)} ${badges.length ? "(" + badges.join(", ") + ")" : "(inget filter/namnbyte)"}`;
     box.appendChild(toggle);
 
     const filterControls = this._buildFilterFieldsControls(rule);
@@ -621,11 +689,19 @@ class CalCombinerPanel extends HTMLElement {
     filterControls.element.style.background = "";
     filterControls.element.style.padding = "";
 
+    const renameLabel = document.createElement("div");
+    renameLabel.className = "cc-section-title";
+    renameLabel.style.margin = "10px 0 4px 0";
+    renameLabel.textContent = "Byt namn på event (regex, körs i tur och ordning)";
+    filterControls.element.appendChild(renameLabel);
+    const renameControls = this._buildRenameRulesControls(renameRules);
+    filterControls.element.appendChild(renameControls.element);
+
     const actions = document.createElement("div");
     actions.className = "cc-actions";
 
     const saveBtn = document.createElement("button");
-    saveBtn.textContent = "Spara filter";
+    saveBtn.textContent = "Spara filter och namnbyte";
     saveBtn.onclick = async () => {
       const values = filterControls.getValues();
       const include = values.include.split(",").map((s) => s.trim()).filter(Boolean);
@@ -640,19 +716,31 @@ class CalCombinerPanel extends HTMLElement {
         source_entity_id: sourceEntityId,
         filter,
       });
+      await this._hass.callWS({
+        type: "cal_combiner/update_rename",
+        entry_id: entry.entry_id,
+        source_entity_id: sourceEntityId,
+        rules: renameControls.getValues(),
+      });
       this._openFilters[key] = true;
       await this._reload();
     };
 
     const clearBtn = document.createElement("button");
     clearBtn.className = "secondary";
-    clearBtn.textContent = "Ta bort filter";
+    clearBtn.textContent = "Ta bort filter och namnbyte";
     clearBtn.onclick = async () => {
       await this._hass.callWS({
         type: "cal_combiner/update_filter",
         entry_id: entry.entry_id,
         source_entity_id: sourceEntityId,
         filter: null,
+      });
+      await this._hass.callWS({
+        type: "cal_combiner/update_rename",
+        entry_id: entry.entry_id,
+        source_entity_id: sourceEntityId,
+        rules: [],
       });
       await this._reload();
     };
