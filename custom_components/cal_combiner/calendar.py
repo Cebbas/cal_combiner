@@ -6,7 +6,6 @@ import hashlib
 import logging
 import re
 
-from homeassistant.components import persistent_notification
 from homeassistant.components.calendar import (
     DOMAIN as CALENDAR_DOMAIN,
     CalendarEntity,
@@ -17,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -36,6 +36,10 @@ from .own_calendar import OwnCalendarStore
 
 _LOGGER = logging.getLogger(__name__)
 SCAN_INTERVAL = timedelta(minutes=5)
+# How many consecutive failed polls a source needs before it's surfaced as a
+# repair issue - a single blip (a flaky proxy, a momentary timeout) shouldn't
+# raise a user-visible issue on every poll; it should just quietly retry.
+FAILURE_THRESHOLD = 2
 UID_SEPARATOR = "::"
 # Marks a merged uid as belonging to the calendar's own store rather than an
 # external source entity_id (which can never collide with this, since entity
@@ -294,22 +298,28 @@ async def delete_event(
     await async_log(hass, entry.entry_id, f"Event borttaget: {orig_uid}")
 
 
+def _failed_sources_issue_id(entry: ConfigEntry) -> str:
+    return f"failed_sources_{entry.entry_id}"
+
+
 async def _notify_failed_sources(hass: HomeAssistant, entry: ConfigEntry, failed: list[str]) -> None:
-    persistent_notification.async_create(
+    ir.async_create_issue(
         hass,
-        (
-            f"Följande källkalendrar svarade inte och är tillfälligt uteslutna ur "
-            f"\"{entry.data.get(CONF_NAME, 'Merged Calendar')}\":\n\n"
-            + "\n".join(f"- {e}" for e in failed)
-        ),
-        title="Cal Combiner: en källa svarar inte",
-        notification_id=f"cal_combiner_failed_{entry.entry_id}",
+        DOMAIN,
+        _failed_sources_issue_id(entry),
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="failed_sources",
+        translation_placeholders={
+            "name": entry.data.get(CONF_NAME, "Merged Calendar"),
+            "sources": "\n".join(f"- {e}" for e in failed),
+        },
     )
     await async_log(hass, entry.entry_id, "Källa svarar inte: " + ", ".join(failed))
 
 
 async def _dismiss_failed_notification(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    persistent_notification.async_dismiss(hass, f"cal_combiner_failed_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, _failed_sources_issue_id(entry))
     await async_log(hass, entry.entry_id, "Alla källor svarar igen")
 
 
@@ -348,7 +358,8 @@ class MergedCalendarCoordinator(DataUpdateCoordinator):
         super().__init__(hass, _LOGGER, name="cal_combiner", update_interval=SCAN_INTERVAL)
         self.entry = entry
         self._store = store
-        self._last_failed: set[str] = set()
+        self._fail_streaks: dict[str, int] = {}
+        self._last_notified_failed: set[str] = set()
         self._last_fingerprint: str | None = None
 
     async def _async_update_data(self):
@@ -358,11 +369,24 @@ class MergedCalendarCoordinator(DataUpdateCoordinator):
         )
 
         failed_set = set(failed)
-        if failed_set and failed_set != self._last_failed:
-            await _notify_failed_sources(self.hass, self.entry, failed)
-        elif not failed_set and self._last_failed:
+        for source in failed_set:
+            self._fail_streaks[source] = self._fail_streaks.get(source, 0) + 1
+        for source in list(self._fail_streaks):
+            if source not in failed_set:
+                del self._fail_streaks[source]
+
+        # Retry/backoff: a source only gets escalated to a user-visible repair
+        # issue once it's failed FAILURE_THRESHOLD polls in a row, not on the
+        # first blip - see FAILURE_THRESHOLD's docstring. `failed` (below,
+        # returned as-is) still reflects the raw, un-debounced per-poll result,
+        # since that source's events genuinely are missing from this poll
+        # either way.
+        persistently_failed = {s for s, count in self._fail_streaks.items() if count >= FAILURE_THRESHOLD}
+        if persistently_failed and persistently_failed != self._last_notified_failed:
+            await _notify_failed_sources(self.hass, self.entry, sorted(persistently_failed))
+        elif not persistently_failed and self._last_notified_failed:
             await _dismiss_failed_notification(self.hass, self.entry)
-        self._last_failed = failed_set
+        self._last_notified_failed = persistently_failed
 
         # Our own store already bumps the CalDAV ctag on every mutation of its
         # own, but a merged external source calendar changing (an event

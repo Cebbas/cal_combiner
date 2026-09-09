@@ -225,16 +225,23 @@ Server-fliken.
 ## 9. Om en källa inte svarar
 
 Om en källkalender inte går att nå (t.ex. utgången Google-token) exkluderas
-den tillfälligt och du får en notis i HA om vilken källa det gäller. Notisen
-försvinner automatiskt igen så fort källan svarar normalt. Det syns även i
-kalenderns "Senaste händelser"-logg i panelen.
+den tillfälligt. Misslyckas den två pollningar i rad (~10 min) syns det som
+en riktig issue under Inställningar → Repairs, med källans namn - en
+enstaka tillfällig blip flaggas alltså inte direkt. Issuen försvinner
+automatiskt igen så fort källan svarar normalt. Det syns även i kalenderns
+"Senaste händelser"-logg i panelen.
 
 ## 10. Tester
 
-Filterlogik, ICS-generering och create/update/delete-vidarebefordran
-(egen lagring vs. extern källa) täcks av en pytest-svit under `tests/`,
-byggd på `pytest-homeassistant-custom-component` (ger en riktig `hass`-
-instans för de tester som behöver lagring). Köra lokalt:
+Filterlogik, ICS-generering, create/update/delete-vidarebefordran (egen
+lagring vs. extern källa) och sjäva CalDAV-protokollet täcks av en
+pytest-svit under `tests/`, byggd på
+`pytest-homeassistant-custom-component` (ger en riktig `hass`-instans för
+de tester som behöver lagring). `tests/test_caldav_interop.py` driver
+servern med det oberoende `caldav`-biblioteket mot en riktig aiohttp-server
+(discovery, skapa/lista/redigera/ta bort, återkommande event med
+enstaka-tillfälle-redigering, fel lösenord) - inte bara mock av vår egen
+kod. Köra lokalt:
 
 ```bash
 pip install -r requirements_test.txt
@@ -242,9 +249,7 @@ pytest tests/ -q
 ```
 
 Körs även automatiskt i CI (`.github/workflows/validate.yml`) vid varje
-push/PR. CalDAV-protokollet (PROPFIND/REPORT-routning, auth) täcks inte av
-den här sviten - det verifieras separat med ett fristående interop-test mot
-en riktig CalDAV-klient, se IDEAS.md.
+push/PR.
 
 ## 11. Bygga vidare
 

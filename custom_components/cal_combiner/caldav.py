@@ -44,7 +44,7 @@ setup.
 from __future__ import annotations
 
 import base64
-from datetime import timedelta
+from datetime import datetime, timedelta
 import hashlib
 import hmac
 import logging
@@ -255,6 +255,25 @@ def _as_list(value) -> list:
 # ---- iCalendar serialization ----
 
 
+def _ics_dt(value):
+    """Normalize an outgoing datetime to UTC before handing it to icalendar.
+
+    A datetime with a fixed-offset tzinfo (e.g. from a CalDAV client's own
+    local timezone, once round-tripped through our own storage) has no IANA
+    zone name. icalendar then invents a synthetic TZID like "UTC-07:00" with
+    no matching VTIMEZONE component - which other clients (including our own
+    PUT handler, re-parsing what we just served) can't resolve and silently
+    downgrade to a naive/floating time. Converting to UTC ('Z' suffix, no
+    TZID needed) sidesteps the ambiguity entirely and is always correct: the
+    represented instant is unchanged, and every client already renders it in
+    the viewer's own local time regardless of the DTSTART's declared zone.
+    date (all-day) values pass through unchanged.
+    """
+    if isinstance(value, datetime) and value.tzinfo is not None:
+        return value.astimezone(dt_util.UTC)
+    return value
+
+
 def _own_item_to_ics(item: dict[str, Any]) -> str:
     cal = Calendar()
     cal.add("prodid", "-//Cal Combiner//Home Assistant//")
@@ -267,8 +286,8 @@ def _own_item_to_ics(item: dict[str, Any]) -> str:
     master = ICalEvent()
     master.add("uid", item["uid"])
     master.add("summary", item.get("summary") or "")
-    master.add("dtstart", master_start)
-    master.add("dtend", master_end)
+    master.add("dtstart", _ics_dt(master_start))
+    master.add("dtend", _ics_dt(master_end))
     if item.get("description"):
         master.add("description", item["description"])
     if item.get("location"):
@@ -276,6 +295,12 @@ def _own_item_to_ics(item: dict[str, Any]) -> str:
     if rrule:
         master.add("rrule", rrule)
         for exd in item.get("exdates") or []:
+            # NOT normalized to UTC, unlike dtstart/dtend above: exd is already
+            # the exact occ_key string _expand() computes and matches against
+            # (see own_calendar.py), so it must stay byte-identical to what a
+            # client editing this event would need to echo back for its
+            # RECURRENCE-ID to resolve to the same occurrence - see
+            # recurrence-id below.
             master.add("exdate", parse_dt(exd))
     cal.add_component(master)
 
@@ -284,11 +309,14 @@ def _own_item_to_ics(item: dict[str, Any]) -> str:
         for occ_key, override in (item.get("overrides") or {}).items():
             ov = ICalEvent()
             ov.add("uid", item["uid"])
+            # NOT normalized to UTC - must stay byte-identical to occ_key (see
+            # the exdate comment above): this is the value handle_put() reads
+            # back to decide which stored occurrence an edit applies to.
             ov.add("recurrence-id", parse_dt(occ_key))
             occ_start = parse_dt(override["start"]) if "start" in override else parse_dt(occ_key)
             occ_end = parse_dt(override["end"]) if "end" in override else occ_start + duration
-            ov.add("dtstart", occ_start)
-            ov.add("dtend", occ_end)
+            ov.add("dtstart", _ics_dt(occ_start))
+            ov.add("dtend", _ics_dt(occ_end))
             ov.add("summary", override.get("summary", item.get("summary")) or "")
             description = override.get("description", item.get("description"))
             if description:
@@ -308,8 +336,8 @@ def _external_event_to_ics(ev: CalendarEvent) -> str:
     vevent = ICalEvent()
     vevent.add("uid", ev.uid)
     vevent.add("summary", ev.summary or "")
-    vevent.add("dtstart", ev.start)
-    vevent.add("dtend", ev.end)
+    vevent.add("dtstart", _ics_dt(ev.start))
+    vevent.add("dtend", _ics_dt(ev.end))
     if ev.description:
         vevent.add("description", ev.description)
     if ev.location:

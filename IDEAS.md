@@ -42,11 +42,11 @@
 
 ## Robusthet
 - [x] Options-flow uppdaterat för att undvika kommande HA-deprecation (self.config_entry)
-- [x] Felindikator när en källkalender inte svarar (attribut `failed_sources` + notis vid nytt fel, notis försvinner när felet är löst)
+- [x] Felindikator när en källkalender inte svarar (attribut `failed_sources` + repair-issue vid ihållande fel, se raden nedan för detaljer - försvinner när felet är löst)
 - [x] ICS-prenumerationslänken byggs med `homeassistant.helpers.network.get_url` (extern → intern → IP-fallback) istället för att bara läsa `external_url`/`internal_url`, så länken faktiskt fungerar när inget av dem är satt fullständigt
 - [x] Tar bort kalenderns egen `OwnCalendarStore`-fil (`.storage/cal_combiner_own_<entry_id>`) när kalendern tas bort – tidigare låg alla dess egna event kvar på disk för evigt eftersom `ws_delete_entry` bara städade aktivitetsloggen och CalDAV-inställningarna, inte den egna kalenderns lagring
-- [ ] Repair-issue (istället för bara persistent_notification) så felet syns i Inställningar → Repairs
-- [ ] Retry/backoff om en källa svarar ostabilt istället för att direkt räknas som "failed" för hela pollningsintervallet
+- [x] Repair-issue (istället för bara persistent_notification) så felet syns i Inställningar → Repairs – `homeassistant.helpers.issue_registry`, en åtgärdbar (`is_fixable=False`, `IssueSeverity.WARNING`) issue per kalenderentry, döljs automatiskt när alla källor svarar igen.
+- [x] Retry/backoff om en källa svarar ostabilt istället för att direkt räknas som "failed" för hela pollningsintervallet – koordinatorn räknar nu antal pollningar i rad en källa misslyckats (`_fail_streaks`) och väntar med att höja repair-issuen tills `FAILURE_THRESHOLD` (2) i rad, så en enstaka blip inte flaggas. `failed_sources`-attributet är opåverkat (visar fortfarande rådata per pollning) eftersom källans event faktiskt saknas den pollningen oavsett.
 - [ ] Reauth-flow (`async_step_reauth`) så en källa med utgången token (t.ex. Google) kan återautentiseras direkt istället för att integrationen behöver tas bort och läggas till igen
 - [ ] Diagnostics-stöd (`diagnostics.py`) för att exportera felsökningsdata via HA:s inbyggda diagnostics-gränssnitt
 
@@ -71,7 +71,7 @@
 
 ## Tester
 - [x] Automatiserade tester (unit-tester för filterlogik, ICS-generering, create/update/delete-vidarebefordran) – pytest-svit i `tests/` (byggd på `pytest-homeassistant-custom-component`), körs i CI via `.github/workflows/validate.yml`. Täcker filter/rename (`_matches_filter`/`_apply_rename`), `fetch_merged_events` (merge, per-källa filter/rename, misslyckad källa), `OwnCalendarStore` (RRULE-expansion, exdate, override, hela serien, ctag), och create/update/delete-routning (egen lagring vs. extern källas `supported_features`). Täcker INTE CalDAV-protokollet självt (PROPFIND/REPORT-XML, Basic Auth) – se raden nedan.
-- [ ] Köra om CalDAV-interop-testet mot den nya delade servern (flera collections under samma konto, inte en collection per konto som tidigare)
+- [x] Köra om CalDAV-interop-testet mot den nya delade servern (flera collections under samma konto, inte en collection per konto som tidigare) – nu committat i `tests/test_caldav_interop.py` (drivs av det oberoende `caldav`-biblioteket mot en riktig aiohttp-server, inte bara mock av vår egen kod) så det inte tappas bort igen. Hittade och fixade en riktig bugg: fast-offset-tidszoner (t.ex. en klients eget "US/Pacific") fick en påhittad, ovillständig `TZID` som kraschade efterföljande listning – se CHANGELOG 0.0.17.
 
 ## Trevligt-att-ha (ej påbörjat)
 - [ ] Device-gruppering för entiteterna i UI:t
