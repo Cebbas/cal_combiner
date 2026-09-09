@@ -75,6 +75,18 @@ class OwnCalendarStore:
         """Delete the underlying storage file entirely (the owning entry is being deleted)."""
         await self._store.async_remove()
 
+    async def async_touch_ctag(self) -> None:
+        """Bump ctag with no event change of our own - a merged external source changed instead.
+
+        CalDAV clients use getctag to cheaply tell "did anything in this
+        collection change" without re-fetching everything, but our own
+        mutations aren't the only thing that can change what the collection
+        serves: an external source calendar picking up a new/edited/removed
+        event on the coordinator's poll changes it too.
+        """
+        self.ctag += 1
+        await self._store.async_save({"events": self.events, "ctag": self.ctag})
+
     async def _async_save(self) -> None:
         # Bumped on every mutation so CalDAV clients can cheaply tell "did
         # anything in this collection change" without re-fetching everything.

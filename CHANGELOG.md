@@ -2,6 +2,9 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.14 – 2026-09-09
+- Fix: CalDAV-kontots `getctag` (Apple Kalender/Thunderbird/DAVx5 m.fl. använder den för att billigt avgöra "har något ändrats" innan de synkar om) ökade bara vid ändringar i kalenderns egen lagring – aldrig när koordinatorns periodiska poll upptäckte att en källkalender fått ett nytt/ändrat/borttaget event. Källkalenderändringar syntes därför i HA:s egen kalendervy men inte hos CalDAV-anslutna appar, som trodde inget hade hänt. `getctag` trycks nu upp även när pollens sammanslagna resultat skiljer sig från föregående poll.
+
 ## 0.0.13 – 2026-08-07
 - Ny: namnbytesregler går att flytta upp/ner (↑/↓, numrerade rader) i panelen – ankrade regler (`^...$`) är ordningsberoende och innan detta gick fel ordning bara att fixa genom att radera och lägga till på nytt.
 

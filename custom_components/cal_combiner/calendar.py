@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import hashlib
 import logging
 import re
 
@@ -111,6 +112,14 @@ def _apply_rename(item: dict, rules: list[dict] | None) -> dict:
         except re.error as err:
             _LOGGER.warning("Ogiltigt regex-mönster för namnbyte %r: %s", pattern, err)
     return fields
+
+
+def _events_fingerprint(events: list[CalendarEvent]) -> str:
+    """Cheap "did the merged set change" signature, for bumping the CalDAV ctag on a poll."""
+    payload = "\n".join(
+        f"{e.uid}\0{e.summary}\0{e.start}\0{e.end}\0{e.description}\0{e.location}" for e in events
+    )
+    return hashlib.sha1(payload.encode()).hexdigest()
 
 
 def _parse_merged_uid(merged_uid: str) -> tuple[str, str] | None:
@@ -340,6 +349,7 @@ class MergedCalendarCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._store = store
         self._last_failed: set[str] = set()
+        self._last_fingerprint: str | None = None
 
     async def _async_update_data(self):
         now = dt_util.now()
@@ -353,6 +363,16 @@ class MergedCalendarCoordinator(DataUpdateCoordinator):
         elif not failed_set and self._last_failed:
             await _dismiss_failed_notification(self.hass, self.entry)
         self._last_failed = failed_set
+
+        # Our own store already bumps the CalDAV ctag on every mutation of its
+        # own, but a merged external source calendar changing (an event
+        # added/edited/removed there) never touches our store - the only way
+        # to notice that here is comparing this poll's merged result against
+        # the last one, so CalDAV clients relying on getctag actually re-sync.
+        fingerprint = _events_fingerprint(events)
+        if self._last_fingerprint is not None and fingerprint != self._last_fingerprint:
+            await self._store.async_touch_ctag()
+        self._last_fingerprint = fingerprint
 
         return {"events": events, "failed": failed}
 
