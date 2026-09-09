@@ -114,6 +114,52 @@ async def test_update_whole_series_changes_every_occurrence(hass):
     assert all(e.summary == "Innebandyträning" for e in events)
 
 
+async def test_update_can_turn_a_plain_event_into_a_recurring_series(hass):
+    store = OwnCalendarStore(hass, "entry1")
+    event = await store.async_create_event(
+        summary="Fotbollsträning",
+        dtstart=_dt("2026-03-02T18:00:00+00:00"),
+        dtend=_dt("2026-03-02T19:00:00+00:00"),
+    )
+    await store.async_update_event(event.uid, {"rrule": "FREQ=WEEKLY;COUNT=3"})
+
+    events = store.events_in_range(_dt("2026-03-01T00:00:00+00:00"), _dt("2026-03-31T00:00:00+00:00"))
+    assert [str(e.start.date()) for e in events] == ["2026-03-02", "2026-03-09", "2026-03-16"]
+
+
+async def test_update_without_rrule_key_leaves_existing_series_untouched(hass):
+    store = OwnCalendarStore(hass, "entry1")
+    event = await store.async_create_event(
+        summary="Fotbollsträning",
+        dtstart=_dt("2026-03-02T18:00:00+00:00"),
+        dtend=_dt("2026-03-02T19:00:00+00:00"),
+        rrule="FREQ=WEEKLY;COUNT=3",
+    )
+    # Same as test_update_whole_series_changes_every_occurrence, but this
+    # asserts specifically that omitting "rrule" from the update payload
+    # (the normal case - most edits don't touch recurrence at all) never
+    # silently drops the series' existing rrule.
+    await store.async_update_event(event.uid, {"summary": "Innebandyträning"})
+
+    events = store.events_in_range(_dt("2026-03-01T00:00:00+00:00"), _dt("2026-03-31T00:00:00+00:00"))
+    assert len(events) == 3
+    assert all(e.summary == "Innebandyträning" for e in events)
+
+
+async def test_update_with_empty_rrule_clears_recurrence(hass):
+    store = OwnCalendarStore(hass, "entry1")
+    event = await store.async_create_event(
+        summary="Fotbollsträning",
+        dtstart=_dt("2026-03-02T18:00:00+00:00"),
+        dtend=_dt("2026-03-02T19:00:00+00:00"),
+        rrule="FREQ=WEEKLY;COUNT=3",
+    )
+    await store.async_update_event(event.uid, {"rrule": ""})
+
+    events = store.events_in_range(_dt("2026-03-01T00:00:00+00:00"), _dt("2026-03-31T00:00:00+00:00"))
+    assert [str(e.start.date()) for e in events] == ["2026-03-02"]
+
+
 async def test_all_day_event_is_date_only(hass):
     store = OwnCalendarStore(hass, "entry1")
     # Direct manipulation to avoid needing the storage layer for this pure-expansion check.

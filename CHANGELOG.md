@@ -2,11 +2,14 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
-## 0.0.18 – 2026-09-09
+## 0.0.20 – 2026-09-09
 - Ny: en källkalender som slutat svara syns nu som en riktig repair-issue (Inställningar → Repairs) istället för bara en persistent notification. Den höjs dock inte förrän källan misslyckats två pollningar i rad (~10 min) istället för direkt vid en enstaka tillfällig blip, och försvinner igen automatiskt så fort källan svarar.
 
-## 0.0.17 – 2026-09-09
+## 0.0.19 – 2026-09-09
 - Fix: en event-tid vars tidszon är en fast offset (t.ex. en kalenderapps eget "US/Pacific" som lagrats som `-07:00`, snarare än en namngiven zon som HA:s egna events alltid har) fick tidigare en påhittad, ogiltig `TZID` (t.ex. `"UTC-07:00"`) utan matchande `VTIMEZONE`-block när den skickades ut via CalDAV. Strikta klienter (inklusive vår egen PUT-hantering, som läser tillbaka det vi själva skickat ut) kan inte slå upp en sådan TZID och tolkar tiden som tidszonslös istället för att flagga ett fel - vilket kraschade efterföljande listningar av eventet. Alla utgående datum/tider normaliseras nu till UTC (`Z`) innan de skickas, vilket alltid går att tolka entydigt oavsett klient. Hittades via ett återinfört CalDAV-interoptest (se Tester i IDEAS.md) som denna gång är committat i `tests/`.
+
+## 0.0.18 – 2026-09-09
+- Ny: `calendar/event/update` på den egna kalendern kan nu skicka med ett `rrule`-fält - gör om en tidigare skapad, enskild händelse till en riktig återkommande serie i efterhand (eller ändrar en befintlig series regel), utan att skapa om den. Ett tomt/uteblivet `rrule`-fält rör aldrig en befintlig series recurrence (bara vanliga fält som titel/tid ändras) - bara en explicit satt rrule-sträng (eller en explicit tom sådan, som återställer till en enkel händelse) påverkar den.
 
 ## 0.0.16 – 2026-09-09
 - Fix: PROPFIND (depth 1) mot en kalender-collection räknade om alla dess källkalendrar live över ett fönster på 400 dagar bakåt + 730 dagar framåt – på varje enskild synk-poll, för varje exponerad kalender. Sedan 0.0.14:s ctag-fix synkar klienter om betydligt oftare (precis som tänkt), vilket gjorde den redan tunga PROPFIND-hanteringen vanlig nog att orsaka timeouts hos klienten – syntes som "Kunde inte uppdatera kalendrar" på iOS med flera exponerade kalendrar. Fönstret är nu 90 dagar bakåt + 365 dagar framåt; en REPORT med ett eget tidsintervall (så som klienter normalt frågar efter den data de faktiskt visar) påverkas inte.

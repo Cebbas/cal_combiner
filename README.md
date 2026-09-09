@@ -102,6 +102,14 @@ redigering/borttagning (många read-only källor, t.ex. de flesta
 prenumerationskalendrar) får du ett tydligt felmeddelande istället för att
 det bara misslyckas tyst.
 
+En redan skapad, enskild händelse på den egna kalendern kan i efterhand
+göras återkommande genom att skicka med ett `rrule`-fält i
+`calendar/event/update` (samma sak en klient som Family Planner Card gör
+via sin redigera-dialog) – den görs då om till en riktig återkommande
+serie från och med det befintliga tillfället, utan att skapas om under
+ett nytt uid. Vanliga redigeringar (titel/tid/plats) som inte skickar med
+`rrule` rör aldrig en befintlig series recurrence.
+
 ## 5. (reserverat)
 
 *(Numret är avsiktligt ledigt – se historiken i `CHANGELOG.md` om du undrar

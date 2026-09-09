@@ -288,6 +288,23 @@ class OwnCalendarStore:
             item["start"] = _serialize(event["dtstart"])
         if "dtend" in event:
             item["end"] = _serialize(event["dtend"])
+        # rrule is only touched when the caller actually sends the key -
+        # every other edit (title/time/location on an already-recurring
+        # master) must leave its existing rrule/exdates/overrides alone.
+        # A truthy rrule here turns a plain event into a recurring one (or
+        # changes an existing series' rule) without discarding exdates/
+        # overrides already made under the old rule; an explicit falsy
+        # rrule clears recurrence entirely, mirroring async_put_master.
+        if "rrule" in event:
+            rrule = event["rrule"]
+            if rrule:
+                item["rrule"] = rrule
+                item.setdefault("exdates", [])
+                item.setdefault("overrides", {})
+            else:
+                item.pop("rrule", None)
+                item.pop("exdates", None)
+                item.pop("overrides", None)
         await self._async_save()
 
     async def async_delete_event(self, uid: str, recurrence_id: str | None = None) -> None:
