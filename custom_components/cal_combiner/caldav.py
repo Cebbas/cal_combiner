@@ -78,8 +78,19 @@ OBJECT_PATH = "/api/cal_combiner/dav/{entry_id}/{uid}.ics"
 
 # How far to look when a request carries no explicit time-range (a plain GET
 # on one resource, or a REPORT/PROPFIND without a parseable filter).
-_LOOKUP_PAST = timedelta(days=400)
-_LOOKUP_FUTURE = timedelta(days=730)
+#
+# PROPFIND depth 1 (handle_propfind) hits this on every single client poll -
+# it's how a client without sync-collection support notices additions/
+# removals, and unlike REPORT it never carries a client-chosen time-range to
+# narrow the window itself. Each such call re-fetches every external source
+# live (see fetch_merged_events), so a wide window here means real per-source
+# API latency on every poll, multiplied by every exposed calendar - wide
+# enough (the previous 400/730 days) to make many-calendar setups time out
+# client-side ("Kunde inte uppdatera kalendrar" on iOS) rather than an
+# actual protocol requirement: clients that want a specific range already
+# ask for one via REPORT's time-range filter.
+_LOOKUP_PAST = timedelta(days=90)
+_LOOKUP_FUTURE = timedelta(days=365)
 
 DAV_NS = "DAV:"
 CALDAV_NS = "urn:ietf:params:xml:ns:caldav"

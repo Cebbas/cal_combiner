@@ -2,6 +2,9 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.16 – 2026-09-09
+- Fix: PROPFIND (depth 1) mot en kalender-collection räknade om alla dess källkalendrar live över ett fönster på 400 dagar bakåt + 730 dagar framåt – på varje enskild synk-poll, för varje exponerad kalender. Sedan 0.0.14:s ctag-fix synkar klienter om betydligt oftare (precis som tänkt), vilket gjorde den redan tunga PROPFIND-hanteringen vanlig nog att orsaka timeouts hos klienten – syntes som "Kunde inte uppdatera kalendrar" på iOS med flera exponerade kalendrar. Fönstret är nu 90 dagar bakåt + 365 dagar framåt; en REPORT med ett eget tidsintervall (så som klienter normalt frågar efter den data de faktiskt visar) påverkas inte.
+
 ## 0.0.14 – 2026-09-09
 - Fix: CalDAV-kontots `getctag` (Apple Kalender/Thunderbird/DAVx5 m.fl. använder den för att billigt avgöra "har något ändrats" innan de synkar om) ökade bara vid ändringar i kalenderns egen lagring – aldrig när koordinatorns periodiska poll upptäckte att en källkalender fått ett nytt/ändrat/borttaget event. Källkalenderändringar syntes därför i HA:s egen kalendervy men inte hos CalDAV-anslutna appar, som trodde inget hade hänt. `getctag` trycks nu upp även när pollens sammanslagna resultat skiljer sig från föregående poll.
 
