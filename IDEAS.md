@@ -26,6 +26,7 @@
 - [x] Ta bort event via den sammanslagna kalendern (skickas vidare till rätt källa)
 - [x] `create_event` anropar källkalenderns entitet direkt istället för att gå via `calendar.create_event`-tjänsten (undviker schemamismatch mellan entitets- och tjänste-nycklar)
 - [x] Återkommande event (RRULE) på den egna kalendern: skapa, visa expanderat i rätt datumintervall, redigera/ta bort hela serien eller bara ett enstaka tillfälle (`recurrence_id`, lagras som `exdates`/`overrides` på master-eventet)
+- [x] `calendar/event/update` kan sätta/ändra `rrule` på ett redan existerande event - en tidigare skapad enskild händelse kan alltså i efterhand göras återkommande (eller en befintlig series regel ändras) utan att skapas om. Rör bara recurrence när fältet faktiskt skickas med - en vanlig titel-/tidsredigering av en redan återkommande serie lämnar dess rrule/exdates/overrides orörda.
 - [x] Redigering/borttagning av ett event från en källkalender som inte stödjer `UPDATE_EVENT`/`DELETE_EVENT` gav tidigare en okontrollerad krasch (t.ex. `AttributeError`) som bubblade upp som ett generiskt 500-fel/synkfel – både via HA:s egen kalendervy och via CalDAV. Källkalenderns `supported_features` kollas nu innan anropet; ett tydligt felmeddelande ("källkalendern stödjer inte redigering/borttagning") skickas tillbaka istället.
 
 ## Tvåvägssync (CalDAV)

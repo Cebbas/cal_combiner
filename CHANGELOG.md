@@ -2,6 +2,9 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.18 – 2026-09-09
+- Ny: `calendar/event/update` på den egna kalendern kan nu skicka med ett `rrule`-fält - gör om en tidigare skapad, enskild händelse till en riktig återkommande serie i efterhand (eller ändrar en befintlig series regel), utan att skapa om den. Ett tomt/uteblivet `rrule`-fält rör aldrig en befintlig series recurrence (bara vanliga fält som titel/tid ändras) - bara en explicit satt rrule-sträng (eller en explicit tom sådan, som återställer till en enkel händelse) påverkar den.
+
 ## 0.0.16 – 2026-09-09
 - Fix: PROPFIND (depth 1) mot en kalender-collection räknade om alla dess källkalendrar live över ett fönster på 400 dagar bakåt + 730 dagar framåt – på varje enskild synk-poll, för varje exponerad kalender. Sedan 0.0.14:s ctag-fix synkar klienter om betydligt oftare (precis som tänkt), vilket gjorde den redan tunga PROPFIND-hanteringen vanlig nog att orsaka timeouts hos klienten – syntes som "Kunde inte uppdatera kalendrar" på iOS med flera exponerade kalendrar. Fönstret är nu 90 dagar bakåt + 365 dagar framåt; en REPORT med ett eget tidsintervall (så som klienter normalt frågar efter den data de faktiskt visar) påverkas inte.
 
