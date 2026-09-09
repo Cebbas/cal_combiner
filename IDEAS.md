@@ -70,7 +70,7 @@
 - [x] "Synka nu"-knapp på varje kalenderkort som tvingar en omedelbar poll av alla källor (`coordinator.async_refresh()`) istället för att vänta upp till 5 minuter på nästa schemalagda uppdatering.
 
 ## Tester
-- [ ] Automatiserade tester (unit-tester för filterlogik, ICS-generering, create/update/delete-vidarebefordran) – idag kör CI bara hassfest/HACS-validering, ingen faktisk testsvit
+- [x] Automatiserade tester (unit-tester för filterlogik, ICS-generering, create/update/delete-vidarebefordran) – pytest-svit i `tests/` (byggd på `pytest-homeassistant-custom-component`), körs i CI via `.github/workflows/validate.yml`. Täcker filter/rename (`_matches_filter`/`_apply_rename`), `fetch_merged_events` (merge, per-källa filter/rename, misslyckad källa), `OwnCalendarStore` (RRULE-expansion, exdate, override, hela serien, ctag), och create/update/delete-routning (egen lagring vs. extern källas `supported_features`). Täcker INTE CalDAV-protokollet självt (PROPFIND/REPORT-XML, Basic Auth) – se raden nedan.
 - [ ] Köra om CalDAV-interop-testet mot den nya delade servern (flera collections under samma konto, inte en collection per konto som tidigare)
 
 ## Trevligt-att-ha (ej påbörjat)

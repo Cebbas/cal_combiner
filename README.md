@@ -229,7 +229,24 @@ den tillfälligt och du får en notis i HA om vilken källa det gäller. Notisen
 försvinner automatiskt igen så fort källan svarar normalt. Det syns även i
 kalenderns "Senaste händelser"-logg i panelen.
 
-## 10. Bygga vidare
+## 10. Tester
+
+Filterlogik, ICS-generering och create/update/delete-vidarebefordran
+(egen lagring vs. extern källa) täcks av en pytest-svit under `tests/`,
+byggd på `pytest-homeassistant-custom-component` (ger en riktig `hass`-
+instans för de tester som behöver lagring). Köra lokalt:
+
+```bash
+pip install -r requirements_test.txt
+pytest tests/ -q
+```
+
+Körs även automatiskt i CI (`.github/workflows/validate.yml`) vid varje
+push/PR. CalDAV-protokollet (PROPFIND/REPORT-routning, auth) täcks inte av
+den här sviten - det verifieras separat med ett fristående interop-test mot
+en riktig CalDAV-klient, se IDEAS.md.
+
+## 11. Bygga vidare
 
 Se `IDEAS.md` för en avbockningsbar lista över vad som är gjort och vad som
 återstår.
@@ -257,4 +274,7 @@ custom_components/
       sv.json
     www/
       cal-combiner-panel.js  # sidopanelens UI (vanilla JS, två flikar: kalendrar/server)
+tests/               # pytest-svit (filter, rename, egen lagring/upprepning, ICS, event-routning)
+requirements_test.txt
+pytest.ini
 ```
