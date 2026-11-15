@@ -2,6 +2,12 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.21 – 2026-11-15
+- Fix: händelser från källkalendrar fick aldrig sitt riktiga `uid`. Tjänsten `calendar.get_events` (som användes för att hämta dem) skickar bara med start/slut/titel/beskrivning/plats - inte `uid` eller `recurrence_id` - så alla tillfällen i en serie fick samma titelbaserade id. Följderna: redigering/borttagning av ett källevent kunde inte hitta rätt händelse i källan (det som tidigare beskrevs som att upprepning "tyst struntas i"), och i ICS-länken/CalDAV delade alla tillfällen i en serie samma UID och samma resurs, så kalenderappar kunde visa bara ett av dem. Källor läses nu direkt från källentiteten (`async_get_events`), och varje tillfälle får ett eget id som bär med sig dess `recurrence_id` - redigera/ta bort når exakt det tillfället i källan. Tjänsten används bara som reserv om entiteten inte går att slå upp.
+- Prestanda: källkalendrarna hämtas parallellt istället för en i taget.
+- Fix: CalDAV `REPORT` tillämpade källornas filter men inte namnbytesreglerna - en app som synkar via REPORT såg de råa titlarna.
+- Obs: eftersom källeventens id ändras visas händelser som tidigare dolts via Family Planner-kortets "Dölj i vecko-/månadskalender" igen och behöver döljas en gång till.
+
 ## 0.0.20 – 2026-09-09
 - Ny: en källkalender som slutat svara syns nu som en riktig repair-issue (Inställningar → Repairs) istället för bara en persistent notification. Den höjs dock inte förrän källan misslyckats två pollningar i rad (~10 min) istället för direkt vid en enstaka tillfällig blip, och försvinner igen automatiskt så fort källan svarar.
 

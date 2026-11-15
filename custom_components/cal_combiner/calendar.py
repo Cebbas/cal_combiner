@@ -1,6 +1,7 @@
 """Calendar platform for Cal Combiner."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import hashlib
 import logging
@@ -45,6 +46,10 @@ UID_SEPARATOR = "::"
 # external source entity_id (which can never collide with this, since entity
 # ids always contain a domain and a dot, e.g. "calendar.foo").
 OWN_SOURCE_MARKER = "__own__"
+# Appended (with the occurrence's recurrence_id) to an external source event's
+# merged uid, so each occurrence of a recurring source event gets its own
+# identity - see _external_uid / _split_occurrence.
+OCCURRENCE_SEPARATOR = "::rid::"
 
 
 def _extract_field_text(item: dict, field: str) -> str:
@@ -154,6 +159,80 @@ def _get_source_entity(hass: HomeAssistant, entity_id: str):
     return component.get_entity(entity_id)
 
 
+def _external_uid(entity_id: str, orig_uid: str, recurrence_id: str | None) -> str:
+    """Merged uid for an event from an external source - unique per occurrence.
+
+    A recurring source event comes back expanded: every occurrence shares the
+    source's uid and is told apart only by its recurrence_id. Folding the
+    recurrence_id into our uid gives each occurrence its own identity, which
+    the ICS feed and CalDAV need (one resource / one UID per flat event - the
+    same model the own store already uses, see own_calendar.RECURRENCE_SEPARATOR)
+    and which update_event/delete_event unfold again (_split_occurrence) to
+    forward the edit to exactly that occurrence in the source.
+    """
+    base = f"{entity_id}{UID_SEPARATOR}{orig_uid}"
+    return f"{base}{OCCURRENCE_SEPARATOR}{recurrence_id}" if recurrence_id else base
+
+
+def _split_occurrence(orig_uid: str) -> tuple[str, str | None]:
+    """Undo the recurrence_id part of _external_uid: (source uid, recurrence_id or None)."""
+    if OCCURRENCE_SEPARATOR in orig_uid:
+        source_uid, recurrence_id = orig_uid.rsplit(OCCURRENCE_SEPARATOR, 1)
+        return source_uid, recurrence_id
+    return orig_uid, None
+
+
+def _parse_event_time(value):
+    """Date/datetime from either a live CalendarEvent field or a service-response string."""
+    if not isinstance(value, str):
+        return value
+    # parse_date first: parse_datetime "succeeds" on a pure date string too
+    # (as a naive midnight datetime), which breaks all-day events.
+    return dt_util.parse_date(value) or dt_util.parse_datetime(value)
+
+
+async def _fetch_source_items(hass: HomeAssistant, entity_id: str, start, end) -> list[dict]:
+    """Raw events from one source, as dicts (summary/description/location/start/end/uid/recurrence_id).
+
+    Asks the source entity directly rather than via the `calendar.get_events`
+    service: the service strips everything except start/end/summary/
+    description/location (homeassistant/components/calendar/const.py,
+    LIST_EVENT_FIELDS) - no uid, no recurrence_id - so every occurrence of a
+    recurring source event used to end up with the same summary-based uid,
+    which broke forwarding edits/deletes to the source and collapsed series
+    to a single event in ICS/CalDAV clients. The service is only a fallback
+    for when the entity object can't be resolved.
+    """
+    entity = _get_source_entity(hass, entity_id)
+    if entity is not None:
+        source_events = await entity.async_get_events(hass, start, end)
+        return [
+            {
+                "summary": e.summary,
+                "description": e.description,
+                "location": e.location,
+                "start": e.start,
+                "end": e.end,
+                "uid": e.uid,
+                "recurrence_id": e.recurrence_id,
+            }
+            for e in source_events
+        ]
+
+    response = await hass.services.async_call(
+        "calendar",
+        "get_events",
+        {
+            "entity_id": entity_id,
+            "start_date_time": start.isoformat(),
+            "end_date_time": end.isoformat(),
+        },
+        blocking=True,
+        return_response=True,
+    )
+    return list(response.get(entity_id, {}).get("events", []))
+
+
 async def fetch_merged_events(
     hass: HomeAssistant,
     sources: list[str],
@@ -164,6 +243,9 @@ async def fetch_merged_events(
 ) -> tuple[list[CalendarEvent], list[str]]:
     """Query every source calendar entity, apply that source's filter, and merge the results.
 
+    Sources are queried concurrently - one slow source (e.g. a remote ICS
+    URL) no longer delays all the others.
+
     Returns (events, failed_entity_ids) so callers can surface source errors.
     """
     filters = filters or {}
@@ -171,34 +253,27 @@ async def fetch_merged_events(
     events: list[CalendarEvent] = []
     failed: list[str] = []
 
-    for entity_id in sources:
-        try:
-            response = await hass.services.async_call(
-                "calendar",
-                "get_events",
-                {
-                    "entity_id": entity_id,
-                    "start_date_time": start.isoformat(),
-                    "end_date_time": end.isoformat(),
-                },
-                blocking=True,
-                return_response=True,
-            )
-        except Exception as err:  # noqa: BLE001 - keep merging even if one source fails
-            _LOGGER.warning("Could not fetch events from %s: %s", entity_id, err)
+    results = await asyncio.gather(
+        *(_fetch_source_items(hass, entity_id, start, end) for entity_id in sources),
+        return_exceptions=True,
+    )
+
+    for entity_id, items in zip(sources, results):
+        if isinstance(items, BaseException):
+            _LOGGER.warning("Could not fetch events from %s: %s", entity_id, items)
             failed.append(entity_id)
             continue
 
         rule = filters.get(entity_id)
         rename_rules = renames.get(entity_id)
-        for item in response.get(entity_id, {}).get("events", []):
+        for item in items:
             if not _matches_filter(item, rule):
                 continue
-            # parse_date first: parse_datetime "succeeds" on a pure date string too
-            # (as a naive midnight datetime), which breaks all-day events.
-            start_val = dt_util.parse_date(item["start"]) or dt_util.parse_datetime(item["start"])
-            end_val = dt_util.parse_date(item["end"]) or dt_util.parse_datetime(item["end"])
-            orig_uid = item.get("uid") or item.get("summary") or ""
+            start_val = _parse_event_time(item["start"])
+            end_val = _parse_event_time(item["end"])
+            # No uid at all (only possible via the service fallback): make it
+            # at least unique per occurrence instead of per title.
+            orig_uid = item.get("uid") or f"{item.get('summary') or ''}@{start_val}"
             renamed = _apply_rename(item, rename_rules)
             events.append(
                 CalendarEvent(
@@ -207,7 +282,7 @@ async def fetch_merged_events(
                     summary=renamed["summary"],
                     description=renamed["description"],
                     location=renamed["location"],
-                    uid=f"{entity_id}{UID_SEPARATOR}{orig_uid}",
+                    uid=_external_uid(entity_id, orig_uid, item.get("recurrence_id")),
                 )
             )
 
@@ -268,8 +343,12 @@ async def update_event(
             raise HomeAssistantError(f"Källkalendern {marker} hittades inte")
         if not source.supported_features & CalendarEntityFeature.UPDATE_EVENT:
             raise HomeAssistantError(f"Källkalendern {marker} stödjer inte redigering av event")
+        source_uid, occurrence_id = _split_occurrence(orig_uid)
         await source.async_update_event(
-            orig_uid, event, recurrence_id=recurrence_id, recurrence_range=recurrence_range
+            source_uid,
+            event,
+            recurrence_id=recurrence_id or occurrence_id,
+            recurrence_range=recurrence_range,
         )
     await async_log(hass, entry.entry_id, f"Event uppdaterat: {event.get('summary') or orig_uid}")
 
@@ -292,8 +371,11 @@ async def delete_event(
             raise HomeAssistantError(f"Källkalendern {marker} hittades inte")
         if not source.supported_features & CalendarEntityFeature.DELETE_EVENT:
             raise HomeAssistantError(f"Källkalendern {marker} stödjer inte borttagning av event")
+        source_uid, occurrence_id = _split_occurrence(orig_uid)
         await source.async_delete_event(
-            orig_uid, recurrence_id=recurrence_id, recurrence_range=recurrence_range
+            source_uid,
+            recurrence_id=recurrence_id or occurrence_id,
+            recurrence_range=recurrence_range,
         )
     await async_log(hass, entry.entry_id, f"Event borttaget: {orig_uid}")
 

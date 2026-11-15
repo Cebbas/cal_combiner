@@ -32,8 +32,10 @@ in one resource - that's how iCalendar actually represents recurrence, not
 one resource per occurrence. Events merged in from external source calendars
 are exposed too (read, and edits are forwarded to the real source, reusing
 the exact routing `calendar.py` already uses for Home Assistant's own
-dashboard) as flat one-off resources, since `calendar.get_events` already
-hands those to us pre-expanded - we never see their own RRULE, if any.
+dashboard) as flat one-off resources - one per occurrence, since sources
+hand their events to us pre-expanded. Each occurrence's uid carries its
+recurrence_id (calendar._external_uid), so occurrences never share a
+resource and an edit/delete reaches exactly that occurrence in the source.
 
 Auth is HTTP Basic (any username, one shared password for the whole account,
 stored below) since that's the literal username/password form Apple
@@ -522,8 +524,15 @@ async def handle_report(request: web.Request) -> web.Response:
         responses.append(
             _object_data_xml(_object_href(entry_id, item["uid"]), _etag_for_item(item), _own_item_to_ics(item))
         )
+    # Same filters AND renames as PROPFIND/GET/the HA dashboard - without the
+    # renames a REPORT-syncing client showed raw source titles.
     external_events, _failed = await fetch_merged_events(
-        hass, entry.data.get(CONF_SOURCES, []), start, end, entry.data.get(CONF_FILTERS, {})
+        hass,
+        entry.data.get(CONF_SOURCES, []),
+        start,
+        end,
+        entry.data.get(CONF_FILTERS, {}),
+        entry.data.get(CONF_RENAME, {}),
     )
     for ev in external_events:
         responses.append(

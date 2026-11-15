@@ -86,7 +86,10 @@
 - [x] Trailing-slash-mismatch i CalDAV: kontots URL delades ut med avslutande `/` men routen registrerades utan, så `PROPFIND` gav 404 direkt. Hittades via ett interop-test mot en riktig server (inte bara enhetstester av vår egen kod). Fixat genom att registrera båda varianterna.
 - [x] Redigering/borttagning via CalDAV (och HA:s egen kalendervy) av ett event som kom från en källkalender utan stöd för uppdatering/borttagning kraschade okontrollerat istället för att ge ett tydligt fel – se "Redigering" ovan.
 
+- [x] Källevent fick aldrig sitt riktiga `uid` (tjänsten `calendar.get_events` skickar inte med det), så tillfällen i en serie delade titelbaserat id - redigering/borttagning nådde inte rätt händelse och ICS/CalDAV-klienter kunde slå ihop serien till ett event. Källor läses nu direkt från entiteten, och varje tillfälle får ett eget id med sitt `recurrence_id` (0.0.21).
+- [x] CalDAV `REPORT` tillämpade inte namnbytesreglerna (0.0.21).
+
 ## Kända begränsningar
-- Recurring events från EXTERNA källkalendrar hanteras som redan expanderade instanser inom tidsfönstret (så kommer `calendar.get_events` från HA:s egna kalenderintegrationer) – redigering av en hel serie sker i källkalendern, inte i merge-kalendern. Den egna kalendern (och CalDAV-servern) stödjer däremot fullt ut återkommande event, se "Redigering" och "Tvåvägssync" ovan.
+- Recurring events från EXTERNA källkalendrar hanteras som redan expanderade instanser inom tidsfönstret – varje tillfälle är en egen platt händelse (med eget id), och redigering/borttagning gäller just det tillfället. Redigering av en hel serie sker i källkalendern, inte i merge-kalendern. Den egna kalendern (och CalDAV-servern) stödjer däremot fullt ut återkommande event, se "Redigering" och "Tvåvägssync" ovan.
 - `calendar.get_events`/entitetsmetoderna för update/delete kräver en tillräckligt ny Home Assistant-version (2023.8+ ungefär) som stödjer `return_response` och entity-baserad update/delete
 - CalDAV-servern implementerar den praktiska delmängden av RFC 4791 som Apple Kalender/Thunderbird/DAVx5 faktiskt använder (fast egenskapsuppsättning i PROPFIND istället för full dynamisk förhandling, ingen `sync-collection` än) – inte hela specifikationen

@@ -148,3 +148,43 @@ async def test_delete_event_raises_if_source_lacks_delete_support():
 def test_resolve_uid_without_separator_raises():
     with pytest.raises(HomeAssistantError):
         _resolve_uid("not-a-merged-uid", action="redigera")
+
+
+# ---- a single occurrence of a recurring source event ----
+
+
+async def test_update_occurrence_forwards_source_uid_and_recurrence_id():
+    hass, source = _hass_with_source("calendar.school")
+    store = MagicMock()
+
+    uid = "calendar.school::series-1::rid::20260320T090000Z"
+    await update_event(hass, _entry(), store, uid, {"summary": "Flyttad"})
+
+    source.async_update_event.assert_awaited_once_with(
+        "series-1", {"summary": "Flyttad"}, recurrence_id="20260320T090000Z", recurrence_range=None
+    )
+
+
+async def test_delete_occurrence_forwards_source_uid_and_recurrence_id():
+    hass, source = _hass_with_source("calendar.school")
+    store = MagicMock()
+
+    await delete_event(hass, _entry(), store, "calendar.school::series-1::rid::20260320T090000Z")
+
+    source.async_delete_event.assert_awaited_once_with(
+        "series-1", recurrence_id="20260320T090000Z", recurrence_range=None
+    )
+
+
+async def test_explicit_recurrence_id_wins_over_the_one_in_the_uid():
+    hass, source = _hass_with_source("calendar.school")
+    store = MagicMock()
+
+    await delete_event(
+        hass, _entry(), store, "calendar.school::series-1::rid::20260320T090000Z",
+        recurrence_id="20260327T090000Z", recurrence_range="THISANDFUTURE",
+    )
+
+    source.async_delete_event.assert_awaited_once_with(
+        "series-1", recurrence_id="20260327T090000Z", recurrence_range="THISANDFUTURE"
+    )
