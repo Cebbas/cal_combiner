@@ -69,7 +69,13 @@ from homeassistant.util import dt as dt_util
 
 from .calendar import _parse_merged_uid, delete_event, fetch_merged_events, update_event
 from .const import CONF_FILTERS, CONF_NAME, CONF_RENAME, CONF_SOURCES, DOMAIN
-from .own_calendar import OwnCalendarStore, _as_datetime, _parse as parse_dt
+from .own_calendar import (
+    OwnCalendarStore,
+    _as_datetime,
+    _parse as parse_dt,
+    occurrence_key,
+    recurrence_start,
+)
 
 _LOGGER = logging.getLogger(__name__)
 _REGISTERED = "cal_combiner_caldav_registered"
@@ -276,6 +282,14 @@ def _ics_dt(value):
     return value
 
 
+def _new_ics_event(uid: str) -> ICalEvent:
+    vevent = ICalEvent()
+    vevent.add("uid", uid)
+    # Required by RFC 5545 in every VEVENT; strict clients reject it missing.
+    vevent.add("dtstamp", dt_util.utcnow().replace(microsecond=0))
+    return vevent
+
+
 def _own_item_to_ics(item: dict[str, Any]) -> str:
     cal = Calendar()
     cal.add("prodid", "-//Cal Combiner//Home Assistant//")
@@ -285,11 +299,16 @@ def _own_item_to_ics(item: dict[str, Any]) -> str:
     master_end = parse_dt(item["end"])
     rrule = item.get("rrule")
 
-    master = ICalEvent()
-    master.add("uid", item["uid"])
+    # A series must be expressed in a named zone: with a UTC (or fixed
+    # offset) DTSTART the client expands the RRULE at that offset and every
+    # occurrence across a DST switch lands an hour off. One-off events stay
+    # in UTC (see _ics_dt). The matching VTIMEZONE is added at the end.
+    series_dt = recurrence_start if rrule else _ics_dt
+
+    master = _new_ics_event(item["uid"])
     master.add("summary", item.get("summary") or "")
-    master.add("dtstart", _ics_dt(master_start))
-    master.add("dtend", _ics_dt(master_end))
+    master.add("dtstart", series_dt(master_start))
+    master.add("dtend", series_dt(master_end))
     if item.get("description"):
         master.add("description", item["description"])
     if item.get("location"):
@@ -297,24 +316,16 @@ def _own_item_to_ics(item: dict[str, Any]) -> str:
     if rrule:
         master.add("rrule", rrule)
         for exd in item.get("exdates") or []:
-            # NOT normalized to UTC, unlike dtstart/dtend above: exd is already
-            # the exact occ_key string _expand() computes and matches against
-            # (see own_calendar.py), so it must stay byte-identical to what a
-            # client editing this event would need to echo back for its
-            # RECURRENCE-ID to resolve to the same occurrence - see
-            # recurrence-id below.
-            master.add("exdate", parse_dt(exd))
+            # Same zone as DTSTART. handle_put() maps whatever the client
+            # echoes back onto the stored key by instant (occurrence_key).
+            master.add("exdate", recurrence_start(parse_dt(exd)))
     cal.add_component(master)
 
     if rrule:
         duration = _as_datetime(master_end) - _as_datetime(master_start)
         for occ_key, override in (item.get("overrides") or {}).items():
-            ov = ICalEvent()
-            ov.add("uid", item["uid"])
-            # NOT normalized to UTC - must stay byte-identical to occ_key (see
-            # the exdate comment above): this is the value handle_put() reads
-            # back to decide which stored occurrence an edit applies to.
-            ov.add("recurrence-id", parse_dt(occ_key))
+            ov = _new_ics_event(item["uid"])
+            ov.add("recurrence-id", recurrence_start(parse_dt(occ_key)))
             occ_start = parse_dt(override["start"]) if "start" in override else parse_dt(occ_key)
             occ_end = parse_dt(override["end"]) if "end" in override else occ_start + duration
             ov.add("dtstart", _ics_dt(occ_start))
@@ -328,6 +339,8 @@ def _own_item_to_ics(item: dict[str, Any]) -> str:
                 ov.add("location", location)
             cal.add_component(ov)
 
+    if rrule and hasattr(cal, "add_missing_timezones"):
+        cal.add_missing_timezones()
     return cal.to_ical().decode("utf-8")
 
 
@@ -335,8 +348,7 @@ def _external_event_to_ics(ev: CalendarEvent) -> str:
     cal = Calendar()
     cal.add("prodid", "-//Cal Combiner//Home Assistant//")
     cal.add("version", "2.0")
-    vevent = ICalEvent()
-    vevent.add("uid", ev.uid)
+    vevent = _new_ics_event(ev.uid)
     vevent.add("summary", ev.summary or "")
     vevent.add("dtstart", _ics_dt(ev.start))
     vevent.add("dtend", _ics_dt(ev.end))
@@ -373,7 +385,7 @@ def _collection_propstat_xml(href: str, name: str, ctag: int) -> str:
 <D:displayname>{name_x}</D:displayname>
 <C:supported-calendar-component-set><C:comp name="VEVENT"/></C:supported-calendar-component-set>
 <CS:getctag>{ctag}</CS:getctag>
-<D:supported-report-set><D:supported-report><D:report><C:calendar-query/></D:report></D:supported-report></D:supported-report-set>
+<D:supported-report-set><D:supported-report><D:report><C:calendar-query/></D:report></D:supported-report><D:supported-report><D:report><C:calendar-multiget/></D:report></D:supported-report></D:supported-report-set>
 </D:prop><D:status>HTTP/1.1 200 OK</D:status></D:propstat>
 </D:response>"""
 
@@ -517,6 +529,9 @@ async def handle_report(request: web.Request) -> web.Response:
     entry_id = request.match_info["entry_id"]
 
     body = await request.read()
+    multiget_hrefs = _parse_multiget_hrefs(body)
+    if multiget_hrefs is not None:
+        return await _handle_multiget(hass, entry, store, entry_id, multiget_hrefs)
     start, end = _parse_time_range(body)
 
     responses = []
@@ -538,6 +553,66 @@ async def handle_report(request: web.Request) -> web.Response:
         responses.append(
             _object_data_xml(_object_href(entry_id, ev.uid), _etag_for_event(ev), _external_event_to_ics(ev))
         )
+
+    return web.Response(status=207, content_type="application/xml", charset="utf-8", text=_multistatus("".join(responses)))
+
+
+def _parse_multiget_hrefs(body: bytes) -> list[str] | None:
+    """The requested hrefs if this REPORT is a calendar-multiget, else None."""
+    if not body:
+        return None
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError:
+        return None
+    if root.tag != f"{{{CALDAV_NS}}}calendar-multiget":
+        return None
+    return [el.text.strip() for el in root.iter(f"{{{DAV_NS}}}href") if el.text]
+
+
+def _not_found_xml(href: str) -> str:
+    return f"<D:response><D:href>{xml_escape(href)}</D:href><D:status>HTTP/1.1 404 Not Found</D:status></D:response>"
+
+
+async def _handle_multiget(hass, entry, store: OwnCalendarStore, entry_id: str, hrefs: list[str]) -> web.Response:
+    """calendar-multiget: return exactly the requested resources (404 for unknown ones).
+
+    iOS/macOS Calendar use this after a PROPFIND to fetch only the resources
+    whose etag changed. Answering it like a calendar-query (everything in the
+    default window) both wastes time and omits requested resources outside
+    that window without saying so; a per-href 404 tells the client cleanly
+    that the resource is gone.
+    """
+    external_by_uid: dict[str, CalendarEvent] | None = None
+    responses = []
+    for href in hrefs:
+        # Clients may send absolute URLs or paths; the uid is the last segment.
+        last = href.rstrip("/").rsplit("/", 1)[-1]
+        if not last.endswith(".ics"):
+            responses.append(_not_found_xml(href))
+            continue
+        uid = unquote(last[: -len(".ics")])
+        item = store.get_master(uid)
+        if item is not None:
+            responses.append(_object_data_xml(href, _etag_for_item(item), _own_item_to_ics(item)))
+            continue
+        if _parse_merged_uid(uid) is not None:
+            if external_by_uid is None:
+                now = dt_util.now()
+                external_events, _failed = await fetch_merged_events(
+                    hass,
+                    entry.data.get(CONF_SOURCES, []),
+                    now - _LOOKUP_PAST,
+                    now + _LOOKUP_FUTURE,
+                    entry.data.get(CONF_FILTERS, {}),
+                    entry.data.get(CONF_RENAME, {}),
+                )
+                external_by_uid = {ev.uid: ev for ev in external_events}
+            ev = external_by_uid.get(uid)
+            if ev is not None:
+                responses.append(_object_data_xml(href, _etag_for_event(ev), _external_event_to_ics(ev)))
+                continue
+        responses.append(_not_found_xml(href))
 
     return web.Response(status=207, content_type="application/xml", charset="utf-8", text=_multistatus("".join(responses)))
 
@@ -628,12 +703,12 @@ async def handle_put(request: web.Request) -> web.Response:
     rrule_prop = master.get("rrule")
     rrule = rrule_prop.to_ical().decode() if rrule_prop else None
     exdates = [
-        d.dt.isoformat() for wrapper in _as_list(master.get("exdate")) for d in wrapper.dts
+        occurrence_key(d.dt) for wrapper in _as_list(master.get("exdate")) for d in wrapper.dts
     ]
 
     overrides: dict[str, dict[str, Any]] = {}
     for ov in override_components:
-        occ_key = ov.get("recurrence-id").dt.isoformat()
+        occ_key = occurrence_key(ov.get("recurrence-id").dt)
         override: dict[str, Any] = {"summary": str(ov.get("summary", summary))}
         if ov.get("description"):
             override["description"] = str(ov.get("description"))

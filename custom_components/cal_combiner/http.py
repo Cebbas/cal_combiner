@@ -67,7 +67,10 @@ class CalendarMergeFeedView(HomeAssistantView):
 
 
 def _build_ics(name: str, events) -> str:
-    from icalendar import Calendar, Event
+    from icalendar import Calendar
+
+    # Local import avoids a circular import (caldav imports calendar).
+    from .caldav import _ics_dt, _new_ics_event
 
     cal = Calendar()
     cal.add("prodid", "-//Cal Combiner//Home Assistant//")
@@ -75,15 +78,16 @@ def _build_ics(name: str, events) -> str:
     cal.add("x-wr-calname", name)
 
     for e in events:
-        ev = Event()
+        # Every occurrence is already expanded here, so UTC is exact - and,
+        # unlike a fixed offset, never becomes an unresolvable TZID.
+        ev = _new_ics_event(e.uid or f"{e.summary}-{e.start}")
         ev.add("summary", e.summary)
-        ev.add("dtstart", e.start)
-        ev.add("dtend", e.end)
+        ev.add("dtstart", _ics_dt(e.start))
+        ev.add("dtend", _ics_dt(e.end))
         if e.description:
             ev.add("description", e.description)
         if e.location:
             ev.add("location", e.location)
-        ev.add("uid", e.uid or f"{e.summary}-{e.start}")
         cal.add_component(ev)
 
     return cal.to_ical().decode("utf-8")

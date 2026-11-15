@@ -58,6 +58,78 @@ def _as_datetime(value: date | datetime) -> datetime:
     return datetime.combine(value, datetime.min.time(), tzinfo=dt_util.UTC)
 
 
+def local_tz():
+    """Home Assistant's configured zone - the wall clock recurring events repeat in."""
+    return dt_util.get_default_time_zone()
+
+
+def recurrence_start(value: date | datetime) -> date | datetime:
+    """A recurring master's start in HA's local zone (dates pass through).
+
+    Stored starts carry only a fixed UTC offset (isoformat), so expanding an
+    rrule straight from them repeats at a fixed offset: a weekly 17:00 event
+    created in summer (+02:00) would land at 16:00 local after the switch to
+    winter time. Expanding from the start in the named local zone keeps the
+    wall-clock time and lets each occurrence pick up its own DST offset.
+    """
+    if not isinstance(value, datetime):
+        return value
+    return _as_datetime(value).astimezone(local_tz())
+
+
+def occurrence_key(value: date | datetime) -> str:
+    """Canonical key for one occurrence: date isoformat, or its instant in HA's local zone.
+
+    Used for exdates/overrides and the compound occurrence uid. Anything that
+    names an occurrence by instant (a CalDAV RECURRENCE-ID in UTC or the
+    client's own zone) maps to the same key.
+    """
+    if not isinstance(value, datetime):
+        return value.isoformat()
+    return _as_datetime(value).astimezone(local_tz()).isoformat()
+
+
+def canonical_occ_key(item: dict[str, Any], key: str) -> str:
+    """Translate a possibly pre-0.0.22 occurrence key into the current format.
+
+    Older versions expanded at the master's fixed offset, so their keys are
+    the occurrence's *wall time* (unchanged by DST) at that offset - e.g.
+    "2026-12-01T17:00:00+02:00" for what is really 17:00 local in winter.
+    A key already in canonical form is returned as-is; otherwise its wall
+    time offset from the master's is re-applied to the master's local start.
+    """
+    parsed = _parse(key) if key else None
+    if not isinstance(parsed, datetime) or parsed.tzinfo is None:
+        return key
+    if occurrence_key(parsed) == key:
+        return key
+    master = _parse(item["start"])
+    if not isinstance(master, datetime):
+        return key
+    master_aware = _as_datetime(master)
+    local_master = master_aware.astimezone(local_tz())
+    wall = local_master.replace(tzinfo=None) + (parsed.replace(tzinfo=None) - master_aware.replace(tzinfo=None))
+    return wall.replace(tzinfo=local_tz()).isoformat()
+
+
+def _migrate_occ_keys(item: dict[str, Any]) -> bool:
+    """Rewrite a recurring item's legacy exdate/override keys in place. True if anything changed."""
+    if not item.get("rrule"):
+        return False
+    changed = False
+    exdates = item.get("exdates") or []
+    new_exdates = [canonical_occ_key(item, k) for k in exdates]
+    if new_exdates != exdates:
+        item["exdates"] = new_exdates
+        changed = True
+    overrides = item.get("overrides") or {}
+    new_overrides = {canonical_occ_key(item, k): v for k, v in overrides.items()}
+    if list(new_overrides) != list(overrides):
+        item["overrides"] = new_overrides
+        changed = True
+    return changed
+
+
 class OwnCalendarStore:
     """Persists a merged calendar's own events as plain JSON."""
 
@@ -70,6 +142,9 @@ class OwnCalendarStore:
         data = await self._store.async_load()
         self.events = (data or {}).get("events", [])
         self.ctag = (data or {}).get("ctag", 0)
+        migrated = [_migrate_occ_keys(item) for item in self.events]
+        if any(migrated):
+            await self._async_save()
 
     async def async_remove(self) -> None:
         """Delete the underlying storage file entirely (the owning entry is being deleted)."""
@@ -161,7 +236,9 @@ class OwnCalendarStore:
 
         all_day = _is_all_day(master_start)
         duration = _as_datetime(master_end) - _as_datetime(master_start)
-        dtstart = _as_datetime(master_start)
+        # All-day: UTC midnight as before (only the date matters). Timed:
+        # repeat in HA's local zone so DST doesn't shift the wall-clock time.
+        dtstart = _as_datetime(master_start) if all_day else recurrence_start(master_start)
 
         try:
             rule = rrulestr(rrule, dtstart=dtstart)
@@ -179,7 +256,7 @@ class OwnCalendarStore:
         for occ in occurrences:
             occ_key_dt = occ.replace(tzinfo=dt_util.UTC) if occ.tzinfo is None else occ
             occ_start = occ_key_dt.date() if all_day else occ_key_dt
-            occ_key = _serialize(occ_start)
+            occ_key = occurrence_key(occ_start)
             if occ_key in exdates:
                 continue
 
@@ -265,6 +342,7 @@ class OwnCalendarStore:
         # compound uid directly, or via the recurrence_id HA passes separately).
         target_occ_key = occ_key or recurrence_id
         if item.get("rrule") and target_occ_key:
+            target_occ_key = canonical_occ_key(item, target_occ_key)
             override: dict[str, Any] = {}
             if "summary" in event:
                 override["summary"] = event["summary"]
@@ -316,6 +394,7 @@ class OwnCalendarStore:
             raise KeyError(uid)
 
         if item.get("rrule") and target_occ_key:
+            target_occ_key = canonical_occ_key(item, target_occ_key)
             item.setdefault("exdates", []).append(target_occ_key)
             item.get("overrides", {}).pop(target_occ_key, None)
             await self._async_save()

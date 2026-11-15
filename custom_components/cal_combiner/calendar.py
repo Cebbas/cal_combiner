@@ -50,6 +50,11 @@ OWN_SOURCE_MARKER = "__own__"
 # merged uid, so each occurrence of a recurring source event gets its own
 # identity - see _external_uid / _split_occurrence.
 OCCURRENCE_SEPARATOR = "::rid::"
+# Last-resort disambiguator for a source that hands out several events with
+# the same uid and no recurrence_id. Duplicate uids would mean duplicate
+# hrefs in a CalDAV multistatus, which makes iOS fail the whole account sync
+# ("Kunde inte uppdatera kalendrar"). Stripped again before forwarding edits.
+DUPLICATE_SEPARATOR = "::dup::"
 
 
 def _extract_field_text(item: dict, field: str) -> str:
@@ -176,6 +181,8 @@ def _external_uid(entity_id: str, orig_uid: str, recurrence_id: str | None) -> s
 
 def _split_occurrence(orig_uid: str) -> tuple[str, str | None]:
     """Undo the recurrence_id part of _external_uid: (source uid, recurrence_id or None)."""
+    if DUPLICATE_SEPARATOR in orig_uid:
+        orig_uid = orig_uid.rsplit(DUPLICATE_SEPARATOR, 1)[0]
     if OCCURRENCE_SEPARATOR in orig_uid:
         source_uid, recurrence_id = orig_uid.rsplit(OCCURRENCE_SEPARATOR, 1)
         return source_uid, recurrence_id
@@ -287,6 +294,11 @@ async def fetch_merged_events(
             )
 
     events.sort(key=lambda e: str(e.start))
+    seen: set[str] = set()
+    for ev in events:
+        if ev.uid in seen:
+            ev.uid = f"{ev.uid}{DUPLICATE_SEPARATOR}{ev.start.isoformat()}"
+        seen.add(ev.uid)
     return events, failed
 
 

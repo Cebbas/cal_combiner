@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 from homeassistant.components.calendar import CalendarEvent
 from homeassistant.util import dt as dt_util
 
+from custom_components.cal_combiner import calendar as cc_calendar
 from custom_components.cal_combiner.calendar import fetch_merged_events
 
 START = dt_util.parse_datetime("2026-03-01T00:00:00+00:00")
@@ -196,3 +197,17 @@ async def test_entity_failure_is_reported_and_others_still_merge():
     events, failed = await fetch_merged_events(hass, ["calendar.a", "calendar.b"], START, END)
     assert failed == ["calendar.b"]
     assert [e.summary for e in events] == ["Träning"]
+
+
+async def test_same_uid_without_recurrence_id_is_made_unique():
+    """A source repeating one uid with no recurrence_id must not yield duplicate
+    uids - they'd become duplicate CalDAV hrefs, which fails the whole iOS sync."""
+    hass = _hass_with_entities(
+        {"calendar.a": [_occurrence(13, recurrence_id=None), _occurrence(20, recurrence_id=None)]}
+    )
+    events, _failed = await fetch_merged_events(hass, ["calendar.a"], START, END)
+    uids = [e.uid for e in events]
+    assert len(set(uids)) == 2
+    assert uids[0] == "calendar.a::series-1"
+    # Forwarding an edit strips the disambiguator again.
+    assert cc_calendar._split_occurrence(cc_calendar._parse_merged_uid(uids[1])[1]) == ("series-1", None)

@@ -2,6 +2,15 @@
 
 Alla nämnvärda ändringar i Cal Combiner dokumenteras här.
 
+## 0.0.22 – 2026-11-15
+- Fix: återkommande egna event hamnade en timme fel efter omställningen till vintertid (eller sommartid). Serien upprepades med den fasta tidsförskjutning som gällde när eventet skapades (t.ex. +02:00), så en träning varje tisdag 17:00 som skapats i oktober visades 16:00 från november. Serier upprepas nu i Home Assistants tidszon och behåller klockslaget. Redan sparade undantag (borttagna eller ändrade tillfällen) flyttas automatiskt över till rätt tillfälle vid uppstart.
+- Fix (CalDAV): återkommande serier skickas nu med `TZID=Europe/Stockholm` (HA:s tidszon) och ett `VTIMEZONE`-block, så att även iPhone/Mac räknar ut tillfällena rätt över sommartidsskiftet. Enstaka event skickas fortfarande i UTC.
+- Fix (ICS-länken): tider skickas i UTC istället för med påhittad `TZID="UTC+02:00"`, och varje event har `DTSTAMP`.
+- Fix (CalDAV/iOS): `EXDATE` och `RECURRENCE-ID` på återkommande egna event skickades fortfarande ut med en påhittad `TZID="UTC+02:00"` utan `VTIMEZONE` (0.0.19 fixade bara `DTSTART`/`DTEND`). Det klienten skickar tillbaka – i UTC eller i sin egen zon – mappas nu till rätt tillfälle.
+- Fix (CalDAV): `calendar-multiget` (som Apple Kalender använder för att hämta just de event som ändrats) besvarades som en full listning. Nu returneras exakt de efterfrågade resurserna, och 404 för de som inte finns.
+- Fix: varje VEVENT har nu `DTSTAMP` (krävs enligt RFC 5545).
+- Fix: en källa som återanvänder samma uid utan `recurrence_id` kan inte längre ge dubbla CalDAV-adresser – dubbletter fick hela kontosynken på iOS att fallera ("Kunde inte uppdatera kalendrar").
+
 ## 0.0.21 – 2026-11-15
 - Fix: händelser från källkalendrar fick aldrig sitt riktiga `uid`. Tjänsten `calendar.get_events` (som användes för att hämta dem) skickar bara med start/slut/titel/beskrivning/plats - inte `uid` eller `recurrence_id` - så alla tillfällen i en serie fick samma titelbaserade id. Följderna: redigering/borttagning av ett källevent kunde inte hitta rätt händelse i källan (det som tidigare beskrevs som att upprepning "tyst struntas i"), och i ICS-länken/CalDAV delade alla tillfällen i en serie samma UID och samma resurs, så kalenderappar kunde visa bara ett av dem. Källor läses nu direkt från källentiteten (`async_get_events`), och varje tillfälle får ett eget id som bär med sig dess `recurrence_id` - redigera/ta bort når exakt det tillfället i källan. Tjänsten används bara som reserv om entiteten inte går att slå upp.
 - Prestanda: källkalendrarna hämtas parallellt istället för en i taget.
